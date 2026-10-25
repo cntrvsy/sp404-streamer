@@ -1,4 +1,6 @@
 /target
 *.AppImage
 *.sha256
+*.tar.gz
 .DS_Store
+

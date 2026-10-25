@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.sp404_streamer</id>
+  
+  <name>SP-404MKII Streamer</name>
+  <summary>Stream live stereo audio from Roland SP-404MKII to Discord and OBS on Linux</summary>
+  
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  
+  <developer id="io.github.sp404_streamer">
+    <name>SP-404 Streamer Contributors</name>
+  </developer>
+
+  <url type="homepage">https://github.com/cntrvsy/sp404-streamer</url>
+  <url type="bugtracker">https://github.com/cntrvsy/sp404-streamer/issues</url>
+  
+  <description>
+    <p>
+      SP-404MKII Streamer is a lightweight, zero-configuration PipeWire audio bridge
+      for the Roland SP-404MKII sampler on Linux desktop environments.
+    </p>
+    <p>
+      It captures class-compliant USB audio from the hardware sampler and presents
+      a live stereo playback stream that can be shared in Discord, Vesktop, or OBS
+      without routing matrix complexity, mono compression, or noise suppression interference.
+    </p>
+  </description>
+  
+  <launchable type="desktop-id">sp404-streamer.desktop</launchable>
+  
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Mixer</category>
+  </categories>
+  
+  <provides>
+    <binary>sp404-streamer</binary>
+  </provides>
+  
+  <content_rating type="oars-1.1" />
+</component>

@@ -1,0 +1,146 @@
+name: CI & Release
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  check:
+    name: Lint & Test
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            libclang-dev \
+            pkg-config \
+            libxkbcommon-dev \
+            libwayland-dev
+
+      - name: Check code formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy lints
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-22.04
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            libclang-dev \
+            pkg-config \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libfuse2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package standard Linux release tarball
+        run: |
+          PKG_NAME="sp404-streamer-x86_64-linux"
+          mkdir -p "${PKG_NAME}"
+          cp target/release/sp404-streamer "${PKG_NAME}/"
+          cp assets/sp404-streamer.desktop "${PKG_NAME}/"
+          cp assets/sp404-streamer.metainfo.xml "${PKG_NAME}/"
+          cp assets/sp404-streamer.png "${PKG_NAME}/"
+          cp assets/sp404-streamer.svg "${PKG_NAME}/"
+          cp README.md "${PKG_NAME}/"
+          cp LICENSE "${PKG_NAME}/"
+          tar -czf "${PKG_NAME}.tar.gz" "${PKG_NAME}"
+
+      - name: Package AppImage
+        run: |
+          APPDIR="/tmp/AppDir"
+          rm -rf "${APPDIR}"
+          mkdir -p "${APPDIR}/usr/bin"
+          mkdir -p "${APPDIR}/usr/share/applications"
+          mkdir -p "${APPDIR}/usr/share/metainfo"
+          mkdir -p "${APPDIR}/usr/share/icons/hicolor/128x128/apps"
+          mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
+          mkdir -p "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
+
+          cp target/release/sp404-streamer "${APPDIR}/usr/bin/"
+          cp assets/sp404-streamer.desktop "${APPDIR}/"
+          cp assets/sp404-streamer.desktop "${APPDIR}/usr/share/applications/"
+          cp assets/sp404-streamer.metainfo.xml "${APPDIR}/usr/share/metainfo/"
+          cp assets/sp404-streamer.png "${APPDIR}/"
+          cp assets/sp404-streamer.png "${APPDIR}/usr/share/icons/hicolor/128x128/apps/"
+          cp assets/icon-256.png "${APPDIR}/usr/share/icons/hicolor/256x256/apps/sp404-streamer.png"
+          cp assets/sp404-streamer.svg "${APPDIR}/"
+          cp assets/sp404-streamer.svg "${APPDIR}/usr/share/icons/hicolor/scalable/apps/"
+          ln -sf sp404-streamer.png "${APPDIR}/.DirIcon"
+
+          # Standard AppRun entrypoint
+          cat << 'EOF' > "${APPDIR}/AppRun"
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export PATH="${HERE}/usr/bin:${PATH}"
+          export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+          exec "${HERE}/usr/bin/sp404-streamer" "$@"
+          EOF
+          chmod +x "${APPDIR}/AppRun"
+
+          # Download and execute official appimagetool
+          curl -sLo /tmp/appimagetool "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x /tmp/appimagetool
+          ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run "${APPDIR}" "sp404-streamer-x86_64.AppImage"
+
+      - name: Generate SHA-256 checksums
+        run: |
+          sha256sum sp404-streamer-x86_64-linux.tar.gz sp404-streamer-x86_64.AppImage > sp404-streamer-checksums.txt
+
+      - name: Upload assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sp404-streamer-x86_64-linux.tar.gz
+            sp404-streamer-x86_64.AppImage
+            sp404-streamer-checksums.txt
+          generate_release_notes: true

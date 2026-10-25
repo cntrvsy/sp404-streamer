@@ -1,8 +1,16 @@
+//! Low-latency PipeWire audio engine and real-time processing streams.
+//!
+//! Spawns the dedicated PipeWire event loop thread and manages:
+//! - An input capture stream unlinked from default microphones and dynamically linked to the SP-404.
+//! - An output playback stream registered with application credentials for Discord window capture.
+//! - A lock-free SPSC ring buffer for inter-stream audio transfer with jitter pre-buffering.
+
 use std::convert::TryInto;
 use std::io::Cursor;
 use std::mem;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use libspa_sys as spa_sys;
@@ -10,10 +18,11 @@ use pipewire as pw;
 use pw::properties::properties;
 use pw::spa::pod::Pod;
 use pw::types::ObjectType;
-use ringbuf::traits::*;
 use ringbuf::HeapRb;
+use ringbuf::traits::*;
 use tracing::{debug, error, info, warn};
 
+use super::command::AudioCommand;
 use super::port_manager::PortManager;
 use super::state::SharedAudioState;
 
@@ -27,27 +36,86 @@ pub const BUFFER_CAPACITY: usize = 16384; // ~170ms of 48kHz stereo float sample
 pub struct PipewireClient {
     state: Arc<SharedAudioState>,
     thread_handle: Option<JoinHandle<()>>,
+    worker_handle: Option<JoinHandle<()>>,
 }
 
 impl PipewireClient {
-    pub fn start(state: Arc<SharedAudioState>) -> Self {
+    pub fn start(state: Arc<SharedAudioState>) -> (Self, mpsc::Sender<AudioCommand>) {
+        let (command_tx, command_rx) = mpsc::channel::<AudioCommand>();
+
+        // 1. Dedicated Command Worker Thread (processes UI/registry commands in FIFO order)
+        let state_for_worker = Arc::clone(&state);
+        let worker_handle = thread::Builder::new()
+            .name("sp404-cmd-worker".into())
+            .spawn(move || {
+                while let Ok(cmd) = command_rx.recv() {
+                    match cmd {
+                        AudioCommand::RoutePlayback { sink_name } => {
+                            *state_for_worker.selected_sink_name.write() = sink_name.clone();
+                            PortManager::route_playback_to_sink(
+                                "sp404_streamer_playback",
+                                sink_name.as_deref(),
+                            );
+                        }
+                        AudioCommand::LinkCapture { sp404_node } => {
+                            PortManager::link_sp404_capture_with_retry(
+                                &sp404_node,
+                                "sp404_streamer_capture",
+                                6,
+                                std::time::Duration::from_millis(40),
+                            );
+                        }
+                        AudioCommand::UnlinkCapture => {
+                            PortManager::unlink_capture_stream("sp404_streamer_capture");
+                        }
+                        AudioCommand::SetLocalMonitorMute(mute) => {
+                            state_for_worker.set_local_monitor_unlinked(mute);
+                            if mute {
+                                PortManager::unlink_local_monitor("sp404_streamer_playback");
+                            } else {
+                                let target_sink =
+                                    state_for_worker.selected_sink_name.read().clone();
+                                PortManager::route_playback_to_sink(
+                                    "sp404_streamer_playback",
+                                    target_sink.as_deref(),
+                                );
+                            }
+                        }
+                        AudioCommand::RefreshSinks => {
+                            let sinks = PortManager::get_available_sinks();
+                            *state_for_worker.available_sinks.write() = sinks;
+                        }
+                    }
+                }
+            })
+            .expect("Failed to spawn audio command worker thread");
+
+        // 2. Dedicated PipeWire Event Loop Thread
         let state_clone = Arc::clone(&state);
+        let cmd_tx_for_pw = command_tx.clone();
         let thread_handle = thread::Builder::new()
             .name("sp404-pipewire".into())
             .spawn(move || {
-                if let Err(e) = Self::run_loop(state_clone) {
+                if let Err(e) = Self::run_loop(state_clone, cmd_tx_for_pw) {
                     error!("PipeWire event loop exited with error: {:?}", e);
                 }
             })
             .expect("Failed to spawn PipeWire thread");
 
-        Self {
-            state,
-            thread_handle: Some(thread_handle),
-        }
+        (
+            Self {
+                state,
+                thread_handle: Some(thread_handle),
+                worker_handle: Some(worker_handle),
+            },
+            command_tx,
+        )
     }
 
-    fn run_loop(state: Arc<SharedAudioState>) -> Result<(), pw::Error> {
+    fn run_loop(
+        state: Arc<SharedAudioState>,
+        command_tx: mpsc::Sender<AudioCommand>,
+    ) -> Result<(), pw::Error> {
         pw::init();
 
         let mainloop = pw::main_loop::MainLoopRc::new(None)?;
@@ -76,6 +144,7 @@ impl PipewireClient {
 
         let playback_stream = pw::stream::StreamBox::new(&core, "sp404-playback", playback_props)?;
 
+        let mut is_primed = false;
         let state_for_playback = Arc::clone(&state);
         let _playback_listener = playback_stream
             .add_local_listener::<()>()
@@ -84,6 +153,8 @@ impl PipewireClient {
                     return;
                 };
 
+                let req = buffer.requested() as usize;
+
                 let datas = buffer.datas_mut();
                 if datas.is_empty() {
                     return;
@@ -91,22 +162,53 @@ impl PipewireClient {
 
                 let data = &mut datas[0];
                 let stride = mem::size_of::<f32>() * DEFAULT_CHANNELS as usize;
-
                 let gain = state_for_playback.get_monitor_gain();
 
                 if let Some(slice) = data.data() {
-                    let n_samples = slice.len() / mem::size_of::<f32>();
-                    let n_frames = slice.len() / stride;
+                    let max_frames = slice.len() / stride;
+                    let n_frames = if req > 0 {
+                        req.min(max_frames)
+                    } else {
+                        256.min(max_frames)
+                    };
 
-                    // Fill buffer from producer or output silence if waiting
-                    for i in 0..n_samples {
-                        let sample = consumer.try_pop().unwrap_or(0.0);
-                        let final_sample = sample * gain;
-                        let start = i * mem::size_of::<f32>();
-                        let end = start + mem::size_of::<f32>();
-                        if end <= slice.len() {
-                            slice[start..end].copy_from_slice(&final_sample.to_le_bytes());
+                    let occupied = consumer.occupied_len();
+
+                    // Pre-buffering / jitter prevention:
+                    // Wait until at least 512 samples (~5.3ms) are buffered before starting playback
+                    if !is_primed && occupied >= 512 {
+                        is_primed = true;
+                    }
+
+                    // Drop stale samples if buffer grows too large (> 4096 samples = ~42ms)
+                    if occupied > 4096 {
+                        let to_drop = occupied - 1024;
+                        for _ in 0..to_drop {
+                            let _ = consumer.try_pop();
                         }
+                    }
+
+                    if is_primed {
+                        for i in 0..n_frames {
+                            let sample_l = consumer.try_pop().unwrap_or_else(|| {
+                                is_primed = false;
+                                0.0
+                            }) * gain;
+                            let sample_r = consumer.try_pop().unwrap_or_else(|| {
+                                is_primed = false;
+                                0.0
+                            }) * gain;
+
+                            let start_l = i * stride;
+                            let start_r = start_l + mem::size_of::<f32>();
+
+                            slice[start_l..start_l + 4].copy_from_slice(&sample_l.to_le_bytes());
+                            slice[start_r..start_r + 4].copy_from_slice(&sample_r.to_le_bytes());
+                        }
+                    } else {
+                        // Output silence while priming
+                        let out_bytes = n_frames * stride;
+                        slice[..out_bytes].fill(0);
                     }
 
                     let chunk = data.chunk_mut();
@@ -159,31 +261,47 @@ impl PipewireClient {
 
         let state_for_add = Arc::clone(&state);
         let target_id_for_add = Arc::clone(&active_target_id);
+        let cmd_tx_for_add = command_tx.clone();
 
         let state_for_remove = Arc::clone(&state);
         let target_id_for_remove = Arc::clone(&active_target_id);
+        let cmd_tx_for_remove = command_tx;
 
         let _registry_listener = registry
             .add_listener_local()
             .global(move |obj| {
-                if obj.type_ == ObjectType::Node {
-                    if let Some(props) = obj.props {
-                        let media_class = props.get("media.class").unwrap_or("");
-                        let node_name = props.get("node.name").unwrap_or("");
-                        let node_desc = props.get("node.description").unwrap_or("");
+                if obj.type_ != ObjectType::Node {
+                    return;
+                }
+                let Some(props) = obj.props else {
+                    return;
+                };
 
-                        // Look for audio source nodes
-                        if media_class == "Audio/Source" {
-                            debug!("Audio Source discovered: {} ({})", node_desc, node_name);
+                let media_class = props.get("media.class").unwrap_or("");
+                let node_name = props.get("node.name").unwrap_or("");
+                let node_desc = props.get("node.description").unwrap_or("");
 
-                            if PortManager::is_sp404_device(node_name, node_desc) {
-                                info!("Found Roland SP-404MKII! Node ID: {}", obj.id);
-                                target_id_for_add.store(obj.id, Ordering::Relaxed);
-                                state_for_add.set_connected(true);
-                                *state_for_add.device_name.write() = node_desc.to_string();
-                            }
-                        }
+                // Look for audio source nodes
+                if media_class == "Audio/Source" {
+                    debug!("Audio Source discovered: {} ({})", node_desc, node_name);
+
+                    if PortManager::is_sp404_device(node_name, node_desc) {
+                        info!(
+                            "Found Roland SP-404MKII! Node ID: {}, Node Name: {}",
+                            obj.id, node_name
+                        );
+                        target_id_for_add.store(obj.id, Ordering::Relaxed);
+                        state_for_add.set_connected(true);
+                        *state_for_add.device_name.write() = node_desc.to_string();
+                        *state_for_add.sp404_node_name.write() = Some(node_name.to_string());
+
+                        let _ = cmd_tx_for_add.send(AudioCommand::LinkCapture {
+                            sp404_node: node_name.to_string(),
+                        });
                     }
+                } else if media_class == "Audio/Sink" {
+                    // Reactively refresh available sinks when a new sink appears
+                    let _ = cmd_tx_for_add.send(AudioCommand::RefreshSinks);
                 }
             })
             .global_remove(move |id| {
@@ -191,21 +309,25 @@ impl PipewireClient {
                     warn!("SP-404MKII was unplugged/removed (ID: {})", id);
                     target_id_for_remove.store(0, Ordering::Relaxed);
                     state_for_remove.set_connected(false);
-                    *state_for_remove.device_name.write() =
-                        "Waiting for SP-404MKII...".to_string();
-                    state_for_remove.set_peak_l(-60.0);
-                    state_for_remove.set_peak_r(-60.0);
+                    *state_for_remove.device_name.write() = "Waiting for SP-404MKII...".to_string();
+                    *state_for_remove.sp404_node_name.write() = None;
+                    state_for_remove.set_peaks(0.0, 0.0);
+
+                    let _ = cmd_tx_for_remove.send(AudioCommand::UnlinkCapture);
                 }
+                // Reactively refresh sinks when a node disappears
+                let _ = cmd_tx_for_remove.send(AudioCommand::RefreshSinks);
             })
             .register();
 
-        // 3. Set up Capture Stream
+        // 3. Set up Capture Stream (explicitly unlinked from default system mic)
         let capture_props = properties! {
             *pw::keys::MEDIA_TYPE => "Audio",
             *pw::keys::MEDIA_CATEGORY => "Capture",
             *pw::keys::MEDIA_ROLE => "Music",
             *pw::keys::NODE_NAME => "sp404_streamer_capture",
             *pw::keys::NODE_LATENCY => "256/48000",
+            *pw::keys::NODE_AUTOCONNECT => "false",
         };
 
         let capture_stream = pw::stream::StreamBox::new(&core, "sp404-capture", capture_props)?;
@@ -224,23 +346,34 @@ impl PipewireClient {
                 }
 
                 let data = &mut datas[0];
-                if let Some(samples) = data.data() {
-                    let n_floats = samples.len() / mem::size_of::<f32>();
-                    let n_frames = n_floats / DEFAULT_CHANNELS as usize;
+                let chunk_size = data.chunk().size() as usize;
+                let chunk_offset = data.chunk().offset() as usize;
+
+                if chunk_size == 0 {
+                    return;
+                }
+
+                if let Some(all_bytes) = data.data() {
+                    if chunk_offset + chunk_size > all_bytes.len() {
+                        return;
+                    }
+                    let valid_bytes = &all_bytes[chunk_offset..chunk_offset + chunk_size];
+                    let stride = mem::size_of::<f32>() * DEFAULT_CHANNELS as usize;
+                    let n_frames = chunk_size / stride;
 
                     let mut peak_l: f32 = 0.0;
                     let mut peak_r: f32 = 0.0;
 
                     for i in 0..n_frames {
-                        let idx_l = (i * 2) * mem::size_of::<f32>();
-                        let idx_r = (i * 2 + 1) * mem::size_of::<f32>();
+                        let idx_l = i * stride;
+                        let idx_r = idx_l + mem::size_of::<f32>();
 
-                        if idx_r + mem::size_of::<f32>() <= samples.len() {
+                        if idx_r + mem::size_of::<f32>() <= valid_bytes.len() {
                             let val_l = f32::from_le_bytes(
-                                samples[idx_l..idx_l + 4].try_into().unwrap_or([0; 4]),
+                                valid_bytes[idx_l..idx_l + 4].try_into().unwrap_or([0; 4]),
                             );
                             let val_r = f32::from_le_bytes(
-                                samples[idx_r..idx_r + 4].try_into().unwrap_or([0; 4]),
+                                valid_bytes[idx_r..idx_r + 4].try_into().unwrap_or([0; 4]),
                             );
 
                             peak_l = peak_l.max(val_l.abs());
@@ -252,30 +385,10 @@ impl PipewireClient {
                         }
                     }
 
-                    // Convert linear amplitude to dBFS
-                    let db_l = if peak_l > 0.0001 {
-                        (20.0 * peak_l.log10()).clamp(-60.0, 6.0)
-                    } else {
-                        -60.0
-                    };
-
-                    let db_r = if peak_r > 0.0001 {
-                        (20.0 * peak_r.log10()).clamp(-60.0, 6.0)
-                    } else {
-                        -60.0
-                    };
-
-                    // Check for clipping (> -0.1 dBFS)
-                    if db_l >= -0.1 {
-                        state_for_capture.is_clipped_l.store(true, Ordering::Relaxed);
-                    }
-                    if db_r >= -0.1 {
-                        state_for_capture.is_clipped_r.store(true, Ordering::Relaxed);
-                    }
-
-                    state_for_capture.set_peak_l(db_l);
-                    state_for_capture.set_peak_r(db_r);
-                    state_for_capture.frame_counter.fetch_add(1, Ordering::Relaxed);
+                    state_for_capture.set_peaks(peak_l, peak_r);
+                    state_for_capture
+                        .frame_counter
+                        .fetch_add(1, Ordering::Relaxed);
                 }
             })
             .register()?;
@@ -305,9 +418,7 @@ impl PipewireClient {
         capture_stream.connect(
             pw::spa::utils::Direction::Input,
             None,
-            pw::stream::StreamFlags::AUTOCONNECT
-                | pw::stream::StreamFlags::MAP_BUFFERS
-                | pw::stream::StreamFlags::RT_PROCESS,
+            pw::stream::StreamFlags::MAP_BUFFERS | pw::stream::StreamFlags::RT_PROCESS,
             &mut capture_params,
         )?;
 

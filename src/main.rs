@@ -1,8 +1,14 @@
+//! SP-404MKII Discord Streamer
+//!
+//! A lightweight, zero-configuration PipeWire audio bridge allowing Roland SP-404MKII
+//! users on Linux to stream live audio in 48kHz stereo to Discord/Vesktop and OBS
+//! via application window screen sharing.
+
 pub mod audio;
 pub mod ui;
 
-use std::sync::Arc;
 use eframe::egui;
+use std::sync::Arc;
 use tracing::info;
 
 use audio::{PipewireClient, SharedAudioState};
@@ -22,15 +28,16 @@ fn main() -> eframe::Result<()> {
     // 1. Initialize shared audio state
     let audio_state = SharedAudioState::new();
 
-    // 2. Start PipeWire audio engine in background thread
-    let _pipewire_client = PipewireClient::start(Arc::clone(&audio_state));
+    // 2. Start PipeWire audio engine and command worker in background threads
+    let (_pipewire_client, command_tx) = PipewireClient::start(Arc::clone(&audio_state));
 
     // 3. Configure compact Wayland-friendly viewport
-    let icon_data = eframe::icon_data::from_png_bytes(include_bytes!("../assets/sp404-streamer.png")).ok();
+    let icon_data =
+        eframe::icon_data::from_png_bytes(include_bytes!("../assets/sp404-streamer.png")).ok();
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([360.0, 220.0])
-        .with_min_inner_size([320.0, 190.0])
+        .with_inner_size([370.0, 255.0])
+        .with_min_inner_size([330.0, 220.0])
         .with_resizable(true)
         .with_app_id("sp404-streamer")
         .with_title("SP-404MKII Streamer");
@@ -51,7 +58,7 @@ fn main() -> eframe::Result<()> {
         native_options,
         Box::new(move |cc| {
             RolandTheme::apply(&cc.egui_ctx);
-            Ok(Box::new(Sp404StreamerApp::new(state_for_ui)))
+            Ok(Box::new(Sp404StreamerApp::new(state_for_ui, command_tx)))
         }),
     )
 }

@@ -1,4 +1,11 @@
-use eframe::egui::{self, Color32, CornerRadius, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2};
+//! Roland SP-404 styled stereo VU meter widget.
+//!
+//! Renders real-time audio levels and decaying peak-hold needles along a -60 dBFS to 0 dBFS track,
+//! transitioning from green to Roland amber (-12 dB) to Roland red (-3 dB) with clip indicators.
+
+use eframe::egui::{
+    self, Color32, CornerRadius, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2,
+};
 
 use crate::ui::theme::RolandTheme;
 
@@ -21,7 +28,7 @@ impl<'a> VuMeterWidget<'a> {
 
     /// Converts a dBFS value (-60.0 to 0.0) to a normalized 0.0..=1.0 ratio.
     #[inline]
-    fn db_to_norm(db: f32) -> f32 {
+    pub fn db_to_norm(db: f32) -> f32 {
         if db <= -60.0 {
             0.0
         } else if db >= 0.0 {
@@ -121,5 +128,34 @@ impl<'a> VuMeterWidget<'a> {
         );
 
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_db_to_norm_boundaries() {
+        assert_eq!(VuMeterWidget::db_to_norm(-60.0), 0.0);
+        assert_eq!(VuMeterWidget::db_to_norm(0.0), 1.0);
+        assert_eq!(VuMeterWidget::db_to_norm(-30.0), 0.5);
+    }
+
+    #[test]
+    fn test_db_to_norm_clamping() {
+        assert_eq!(VuMeterWidget::db_to_norm(-100.0), 0.0);
+        assert_eq!(VuMeterWidget::db_to_norm(-60.001), 0.0);
+        assert_eq!(VuMeterWidget::db_to_norm(3.0), 1.0);
+        assert_eq!(VuMeterWidget::db_to_norm(12.0), 1.0);
+    }
+
+    #[test]
+    fn test_db_to_norm_intermediate() {
+        let norm_12 = VuMeterWidget::db_to_norm(-12.0);
+        assert!((norm_12 - 0.8).abs() < f32::EPSILON);
+
+        let norm_6 = VuMeterWidget::db_to_norm(-6.0);
+        assert!((norm_6 - 0.9).abs() < f32::EPSILON);
     }
 }

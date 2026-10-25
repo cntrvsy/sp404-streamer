@@ -2,14 +2,26 @@
 name = "sp404-streamer"
 version = "0.1.0"
 edition = "2024"
+description = "Lightweight stereo audio bridge for streaming Roland SP-404MKII on Linux"
+license = "MIT"
+readme = "README.md"
+keywords = ["sp404", "roland", "pipewire", "audio", "streaming"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/cntrvsy/sp404-streamer"
 
 [dependencies]
-crossbeam-channel = "0.5.17"
 eframe = "0.37.0"
 libspa = "0.10.1"
 libspa-sys = "0.10.1"
 parking_lot = "0.13.0"
-pipewire = "0.10.1"
+pipewire = { version = "0.10.1", features = ["v0_3_50"] }
 ringbuf = "0.5.3"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
