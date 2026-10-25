@@ -1,0 +1,9 @@
+// Add this window rule to your ~/.config/niri/config.kdl
+// to make the SP-404MKII Streamer automatically open as a compact floating HUD:
+
+window-rule {
+    match app-id="sp404-streamer"
+    open-floating true
+    default-column-width { fixed 360; }
+    default-window-height { fixed 220; }
+}

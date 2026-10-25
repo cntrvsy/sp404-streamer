@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=SP-404MKII Streamer
+Comment=Zero-configuration Roland SP-404MKII audio streamer for Discord on Wayland
+Exec=sp404-streamer
+Icon=sp404-streamer
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Recorder;
+StartupWMClass=sp404-streamer
+Keywords=sp404;roland;sampler;discord;stream;pipewire;audio;

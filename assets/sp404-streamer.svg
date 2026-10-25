@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#24242A"/>
+      <stop offset="100%" stop-color="#141416"/>
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFA028"/>
+      <stop offset="100%" stop-color="#FF6A00"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Sampler Body -->
+  <rect x="8" y="8" width="112" height="112" rx="16" fill="url(#bodyGrad)" stroke="#383842" stroke-width="2"/>
+
+  <!-- Screen / Display Section -->
+  <rect x="20" y="18" width="88" height="36" rx="6" fill="#0C0C0E" stroke="#282830" stroke-width="1.5"/>
+
+  <!-- Glowing Audio Level Bars on Screen -->
+  <rect x="28" y="27" width="34" height="6" rx="2" fill="#22C55E"/>
+  <rect x="66" y="27" width="18" height="6" rx="2" fill="#F59E0B"/>
+  <rect x="88" y="27" width="10" height="6" rx="2" fill="#EF4444"/>
+
+  <rect x="28" y="37" width="30" height="6" rx="2" fill="#22C55E"/>
+  <rect x="62" y="37" width="20" height="6" rx="2" fill="#F59E0B"/>
+  <rect x="86" y="37" width="8" height="6" rx="2" fill="#EF4444"/>
+
+  <!-- Knobs / Dials -->
+  <circle cx="28" cy="68" r="8" fill="#1C1C22" stroke="#484856" stroke-width="2"/>
+  <circle cx="52" cy="68" r="8" fill="#1C1C22" stroke="#484856" stroke-width="2"/>
+  <circle cx="76" cy="68" r="8" fill="#1C1C22" stroke="#484856" stroke-width="2"/>
+  <circle cx="100" cy="68" r="8" fill="url(#orangeGrad)"/>
+
+  <!-- 4x3 Performance Pads Grid (Bottom) -->
+  <rect x="22" y="84" width="18" height="14" rx="3" fill="#2A2A34" stroke="#3A3A46" stroke-width="1"/>
+  <rect x="46" y="84" width="18" height="14" rx="3" fill="#2A2A34" stroke="#3A3A46" stroke-width="1"/>
+  <rect x="70" y="84" width="18" height="14" rx="3" fill="#2A2A34" stroke="#3A3A46" stroke-width="1"/>
+  <rect x="94" y="84" width="18" height="14" rx="3" fill="url(#orangeGrad)"/>
+
+  <rect x="22" y="102" width="18" height="14" rx="3" fill="#2A2A34" stroke="#3A3A46" stroke-width="1"/>
+  <rect x="46" y="102" width="18" height="14" rx="3" fill="url(#orangeGrad)"/>
+  <rect x="70" y="102" width="18" height="14" rx="3" fill="#2A2A34" stroke="#3A3A46" stroke-width="1"/>
+  <rect x="94" y="102" width="18" height="14" rx="3" fill="#2A2A34" stroke="#3A3A46" stroke-width="1"/>
+</svg>
