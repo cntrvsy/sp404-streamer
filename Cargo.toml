@@ -1,6 +1,6 @@
 [package]
 name = "sp404-streamer"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Lightweight stereo audio bridge for streaming Roland SP-404MKII on Linux"
 license = "MIT"

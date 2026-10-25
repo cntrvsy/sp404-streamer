@@ -102,7 +102,7 @@ sudo pacman -S pipewire clang wayland libxkbcommon
 # Fedora
 sudo dnf install pipewire-devel clang wayland-devel libxkbcommon-devel
 
-# Ubuntu / Debian
+# Ubuntu (24.04+) / Debian (12+) [requires PipeWire >= 0.3.50]
 sudo apt install libpipewire-0.3-dev libspa-0.2-dev libclang-dev libwayland-dev libxkbcommon-dev
 
 # Build release binary

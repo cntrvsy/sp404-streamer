@@ -10,7 +10,7 @@ on:
 jobs:
   check:
     name: Lint & Test
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
@@ -54,7 +54,7 @@ jobs:
 
   release:
     name: Build & Publish Release
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: check
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -77,7 +77,7 @@ jobs:
             pkg-config \
             libxkbcommon-dev \
             libwayland-dev \
-            libfuse2
+            libfuse2t64
 
       - name: Build release binary
         run: cargo build --release
@@ -130,7 +130,7 @@ jobs:
           # Download and execute official appimagetool
           curl -sLo /tmp/appimagetool "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
           chmod +x /tmp/appimagetool
-          ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run "${APPDIR}" "sp404-streamer-x86_64.AppImage"
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run "${APPDIR}" "sp404-streamer-x86_64.AppImage"
 
       - name: Generate SHA-256 checksums
         run: |
