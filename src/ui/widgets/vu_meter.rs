@@ -48,10 +48,7 @@ impl<'a> VuMeterWidget<'a> {
         let readout_w = 52.0;
 
         // 1. Channel Badge [ L ] / [ R ]
-        let chan_rect = Rect::from_min_size(
-            rect.min,
-            Vec2::new(channel_badge_w, rect.height()),
-        );
+        let chan_rect = Rect::from_min_size(rect.min, Vec2::new(channel_badge_w, rect.height()));
         painter.rect_filled(chan_rect, CornerRadius::same(3), RolandTheme::PANEL_BG);
         painter.rect_stroke(
             chan_rect,
@@ -113,14 +110,19 @@ impl<'a> VuMeterWidget<'a> {
                     };
                     painter.rect_filled(seg_rect, CornerRadius::same(1), lit_color);
                 } else {
-                    painter.rect_filled(seg_rect, CornerRadius::same(1), RolandTheme::METER_SEGMENT_OFF);
+                    painter.rect_filled(
+                        seg_rect,
+                        CornerRadius::same(1),
+                        RolandTheme::METER_SEGMENT_OFF,
+                    );
                 }
             }
 
             // Draw Peak Hold needle
             let norm_peak = Self::db_to_norm(self.peak_hold_db);
             if norm_peak > 0.04 {
-                let peak_x = (inner_track.min.x + track_w * norm_peak).clamp(inner_track.min.x, inner_track.max.x - 1.5);
+                let peak_x = (inner_track.min.x + track_w * norm_peak)
+                    .clamp(inner_track.min.x, inner_track.max.x - 1.5);
                 let peak_color = if self.peak_hold_db >= -3.0 {
                     RolandTheme::METER_RED
                 } else if self.peak_hold_db >= -12.0 {

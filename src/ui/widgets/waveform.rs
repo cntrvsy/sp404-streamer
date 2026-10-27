@@ -61,7 +61,10 @@ impl<'a> WaveformView<'a> {
         // Center zero-crossing line
         let center_y = rect.center().y;
         painter.line_segment(
-            [Pos2::new(rect.left() + 2.0, center_y), Pos2::new(rect.right() - 2.0, center_y)],
+            [
+                Pos2::new(rect.left() + 2.0, center_y),
+                Pos2::new(rect.right() - 2.0, center_y),
+            ],
             Stroke::new(1.0, Color32::from_rgb(25, 28, 38)),
         );
 
@@ -78,7 +81,9 @@ impl<'a> WaveformView<'a> {
 
             // Map pixel slice to corresponding bins to find maximum peak amplitude
             let bin_start = (col * n_bins) / n_columns;
-            let bin_end = (((col + 1) * n_bins) / n_columns).max(bin_start + 1).min(n_bins);
+            let bin_end = (((col + 1) * n_bins) / n_columns)
+                .max(bin_start + 1)
+                .min(n_bins);
 
             let mut amp = 0.0f32;
             for &b in &self.bins[bin_start..bin_end] {
@@ -93,9 +98,9 @@ impl<'a> WaveformView<'a> {
             let line_color = if self.is_playing && norm <= playhead_norm {
                 Color32::from_rgb(255, 185, 30) // Active illuminated amber
             } else if self.is_playing {
-                Color32::from_rgb(125, 62, 14)  // Dimmed unplayed copper
+                Color32::from_rgb(125, 62, 14) // Dimmed unplayed copper
             } else {
-                RolandTheme::ACCENT_ORANGE       // Roland orange/amber
+                RolandTheme::ACCENT_ORANGE // Roland orange/amber
             };
 
             painter.line_segment(
@@ -105,12 +110,16 @@ impl<'a> WaveformView<'a> {
         }
 
         // 3. Hover scrub guide line
-        if response.hovered() && !response.dragged()
+        if response.hovered()
+            && !response.dragged()
             && let Some(pos) = response.hover_pos()
         {
             let hover_x = pos.x.clamp(rect.left() + 4.0, rect.right() - 4.0);
             painter.line_segment(
-                [Pos2::new(hover_x, rect.top() + 2.0), Pos2::new(hover_x, rect.bottom() - 2.0)],
+                [
+                    Pos2::new(hover_x, rect.top() + 2.0),
+                    Pos2::new(hover_x, rect.bottom() - 2.0),
+                ],
                 Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 60)),
             );
         }
@@ -119,7 +128,10 @@ impl<'a> WaveformView<'a> {
         if self.is_playing {
             let playhead_x = rect.left() + 4.0 + (playhead_norm * inner_width);
             painter.line_segment(
-                [Pos2::new(playhead_x, rect.top() + 2.0), Pos2::new(playhead_x, rect.bottom() - 2.0)],
+                [
+                    Pos2::new(playhead_x, rect.top() + 2.0),
+                    Pos2::new(playhead_x, rect.bottom() - 2.0),
+                ],
                 Stroke::new(1.5, Color32::WHITE),
             );
 

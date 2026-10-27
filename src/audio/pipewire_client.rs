@@ -18,8 +18,8 @@ use pipewire as pw;
 use pw::properties::properties;
 use pw::spa::pod::Pod;
 use pw::types::ObjectType;
-use ringbuf::{HeapCons, HeapRb};
 use ringbuf::traits::*;
+use ringbuf::{HeapCons, HeapRb};
 use tracing::{debug, error, info, warn};
 
 use super::command::AudioCommand;
@@ -41,7 +41,9 @@ pub struct PipewireClient {
 }
 
 impl PipewireClient {
-    pub fn start(state: Arc<SharedAudioState>) -> (Self, mpsc::Sender<AudioCommand>, PreviewPlayer) {
+    pub fn start(
+        state: Arc<SharedAudioState>,
+    ) -> (Self, mpsc::Sender<AudioCommand>, PreviewPlayer) {
         let (command_tx, command_rx) = mpsc::channel::<AudioCommand>();
 
         // Preview ring buffer for Crate sample auditioning

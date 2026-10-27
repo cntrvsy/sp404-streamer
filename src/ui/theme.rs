@@ -5,8 +5,8 @@ pub struct RolandTheme;
 impl RolandTheme {
     // Pro Studio Rackmount Palette (FabFilter / Universal Audio style)
     pub const BG_CHARCOAL: Color32 = Color32::from_rgb(11, 12, 16); // Deep Obsidian
-    pub const PANEL_BG: Color32 = Color32::from_rgb(17, 18, 23);    // Sleek Studio Card
-    pub const WELL_BG: Color32 = Color32::from_rgb(9, 10, 13);      // Recessed Meter/Display Well
+    pub const PANEL_BG: Color32 = Color32::from_rgb(17, 18, 23); // Sleek Studio Card
+    pub const WELL_BG: Color32 = Color32::from_rgb(9, 10, 13); // Recessed Meter/Display Well
     pub const BORDER_COLOR: Color32 = Color32::from_rgb(36, 39, 50); // Fine Hairline Border
     pub const BORDER_SUBTLE: Color32 = Color32::from_rgb(26, 28, 36);
 
@@ -19,9 +19,9 @@ impl RolandTheme {
     // Audio status & meter colors
     pub const METER_GREEN: Color32 = Color32::from_rgb(16, 185, 129); // Studio emerald
     pub const METER_AMBER: Color32 = Color32::from_rgb(245, 158, 11); // Studio warm amber
-    pub const METER_RED: Color32 = Color32::from_rgb(239, 68, 68);    // Studio crimson red
-    pub const METER_CLIP: Color32 = Color32::from_rgb(255, 45, 85);   // Glowing clip red
-    pub const METER_BG: Color32 = Color32::from_rgb(9, 10, 13);       // Recessed track
+    pub const METER_RED: Color32 = Color32::from_rgb(239, 68, 68); // Studio crimson red
+    pub const METER_CLIP: Color32 = Color32::from_rgb(255, 45, 85); // Glowing clip red
+    pub const METER_BG: Color32 = Color32::from_rgb(9, 10, 13); // Recessed track
     pub const METER_SEGMENT_OFF: Color32 = Color32::from_rgb(20, 22, 28); // Unlit LED ghosting
 
     pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(243, 244, 246);
@@ -76,7 +76,11 @@ impl RolandTheme {
     /// Standardized navigation tab button with guaranteed contrast across all states.
     pub fn tab_button(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
         let text = egui::RichText::new(label)
-            .color(if selected { Self::TEXT_ON_ACCENT } else { Self::TEXT_SECONDARY })
+            .color(if selected {
+                Self::TEXT_ON_ACCENT
+            } else {
+                Self::TEXT_SECONDARY
+            })
             .strong()
             .size(11.0);
         ui.selectable_label(selected, text)

@@ -1,111 +1,118 @@
-# SP-404MKII Streamer
+# SP-404MKII Streamer & Sample Crate
 
-A small, lightweight audio bridge that lets you stream your Roland SP-404MKII live to Discord/OBS etc.. on Linux in full stereo.
+A lightweight Linux audio bridge and sample workstation for the Roland SP-404MKII. Enables native 48 kHz stereo streaming directly into Discord, Vesktop, and OBS via application screen share, paired with an integrated sample conforming and SD card management deck.
 
 ![SP-404MKII Streamer Preview](assets/sp404-streamer.png)
 
 ---
 
-## The Problem
+## Overview
 
-I just got the sp-404 mk2, love it, yes i have a windows laptop but my main rig is linux (CachyOS) and i wanted to use it with my friends on discord. But getting it to work was a hassle, if you've ever tried to jam on an SP-404 over a Discord call on Linux, you've probably run into these walls:
+On Linux, Discord and Vesktop capture audio exclusively from application windows during screen shares, ignoring USB hardware inputs. Routing sampler outputs into a microphone channel forces the audio through aggressive noise suppression, echo cancellation, and mono compression.
 
-1. **Discord only streams application windows, not hardware inputs:** When you share your screen in Discord (or Vesktop), it captures audio coming _out_ of an app (like a game or media player). It completely ignores USB hardware audio inputs like your sampler.
-2. **Voice chat ruins beat audio:** If you route your SP-404 into your microphone input instead, Discord runs it through aggressive noise suppression, echo cancellation, and mono compression. Kicks get muffled, 808s disappear, and sidechains sound glitchy.
-3. **Patchbay fatigue:** While you _can_ manually link nodes together in `qpwgraph` or `helvum`, nobody wants to spend 5 minutes drawing cables in a matrix just to play a quick pattern for a friend.
-
-**SP-404MKII Streamer solves this in one click.** Plug your SP-404 into your PC over USB-C, launch the app, share the window in Discord, and you're streaming 48kHz stereo.
-
----
-
-## The Philosophy
-
-- **Do one job and get out of the way:** I wanted a tiny window that lives on your desktop, gives you clean stereo meters, routes the audio cleanly, and doesn't get in your face.
-- **Zero clutter, zero configuration:** It detects your SP-404 automatically, grabs the audio, and presents a playback stream that Discord recognizes.
-- **Respect your resources:** Written in native Rust with PipeWire and egui. It uses almost zero CPU and drops to a low refresh rate when you're not playing so it won't drain your laptop or heat up your rig.
-
----
-
-## What This App Is NOT
-
-To keep this tool focused, reliable, and fast, it is deliberately simple:
-
-- **It is NOT a DAW or full project editor:** It does not host VSTs, record multi-track stems, or hack into binary `PROJECT_*.BIN` files.
-- **It is NOT a bloated tagging database:** It does not index your hard drive, demand AI tags, or clutter your filesystem with metadata sidecars.
-- **It is NOT a general audio patchbay:** It won't route your guitars, synths, and webcams simultaneously. If you need complex studio matrix routing, tools like `qpwgraph` or `Carla` are built for that.
-- **It is NOT a permanent background daemon:** It runs as a normal desktop app. When you close the window, it cleanly detaches and leaves your audio setup exactly as it found it.
+**SP-404MKII Streamer** bridges your sampler directly to an application playback stream in native PipeWire without manual patchbay configuration:
+- **Zero-Latency Monitoring:** Full 48 kHz stereo audio routed through a virtual application node recognized by Discord screen capture.
+- **Hardware-Aware Sample Management:** Batch auditions, trims, normalizes, reorders, conforms, and syncs kits directly to your SP-404MKII SD card.
+- **Resource Efficient:** Built in Rust using `egui` and native PipeWire C FFI. Runs with minimal CPU utilization and throttles repaint rates when idle.
 
 ---
 
 ## Features
 
-### 📻 Stream / Live Monitor Deck
-- **Stereo VU Meters:** Roland-styled dual 32-segment LED meters with peak hold, decibel scale, and latching clip indicators.
-- **Audio Output Selector:** Choose whether you want to hear the sound through your headphones, monitor speakers, USB DAC, or system default.
-- **Local Monitor Volume & Mute:** Prominent gain fader with `↺ 100% (0 dB)` unity gain reset, digital readout chip, and one-click mute for latency-free monitoring directly from the SP-404's headphone jack.
-- **Low Latency:** Uses native PipeWire buffers (~5.3ms) with automatic jitter buffering.
-- **Hotplug-Friendly:** Automatically connects and reconnects when the SP-404 is plugged in or unplugged.
+### Stream & Monitor Deck
+- **Stereo VU Meters:** Dual 32-segment LED peak meters with peak-hold readouts, decibel scale, and latching overload clip indicators.
+- **Output Device Routing:** Switch monitor playback between headphones, studio monitors, USB DACs, or the system default sink.
+- **Monitor Volume & Mute:** Precision gain fader with unity reset (`↺ 100% / 0 dB`), numeric readout, and a one-click mute button for zero-latency monitoring from the SP-404MKII headphone jack.
+- **Low Latency:** Native PipeWire buffer allocation (~5.3 ms) with automatic jitter compensation.
+- **Automatic Hotplug:** Instantly connects and restores audio routing whenever the SP-404MKII is connected or reconnected over USB.
 
-### 📦 Sample Crate (Ingestion & SD Sync)
-- **Multi-File & Folder Ingestion:** Fast native multi-file dialogs and recursive folder scanning with automatic kit naming.
-- **Spacebar Auditioning:** Zero-latency preview routed straight through the existing PipeWire monitor stream with immediate cutoff.
-- **Interactive Waveform Scrubbing:** 128-bin transient overview showing duration, peak dBFS, live playhead tracking, and click/drag scrubbing.
-- **Live Search & Pad Reordering:** Filter samples instantly with live match counters and arrange kit sequence (`01–16`) with manual `▲`/`▼` controls or `Ctrl+Up`/`Ctrl+Down` keyboard shortcuts.
-- **Hardware-Conscious Conformer:** Auto-resamples to 48,000 Hz 24-bit linear PCM WAV. Mono files stay 1-channel mono (saving 50% of the hardware's 32-voice polyphony), and stereo stays stereo.
-- **Peak Normalization:** Optional true-peak normalization (default `-0.5 dBFS`).
-- **Hardware OLED Friendly:** Preserves original filenames while sanitizing FAT32 illegal characters and truncating to 14–16 characters to prevent unreadable scrolling on the SP OLED screen.
-- **SD Card Hotplug & Auto-Mount:** Automatically discovers connected SD block devices, auto-mounts SP-404 cards via udisks2 without root permissions, checks write-lock/read-only switches, guards against disk overflows, flushes kernel write buffers (`sync_all()`), and provides a 1-click **Safe Eject** button.
+### Sample Crate & SD Sync
+- **Multi-File & Folder Ingestion:** Native file dialogs with batch multi-selection and recursive directory scanning with kit auto-naming.
+- **Instant Auditioning:** Spacebar-triggered playback routed straight through the PipeWire monitor engine with immediate stop cutoff.
+- **Waveform Overview:** 128-bin transient display with duration, peak dBFS metrics, live playhead tracking, and interactive click/drag scrubbing.
+- **Kit Arrangement:** Live search filtering and pad ordering (`01–16`) with manual controls or keyboard shortcuts.
+- **Hardware Conforming Engine:** Resamples audio to 48,000 Hz 24-bit linear PCM WAV. Preserves mono files as single-channel mono to conserve SP-404MKII polyphony.
+- **Display Sanitization:** Strips illegal FAT32 characters and limits filenames to 16 characters for clean rendering on the SP-404MKII OLED display.
+- **SD Hotplug & Safe Ejection:** Discovers SD cards via `udisks2`, checks hardware write-lock switches, verifies available disk capacity, executes kernel cache flushes (`sync_all()`), and unmounts safely with one click.
 
 ---
 
-## Getting Started
+## Controls & Shortcuts
 
-### 1. Check Your SP-404 Settings (One-time check)
+### Sample Crate
+| Key / Gesture | Context | Action |
+| :--- | :--- | :--- |
+| **`Space`** | Crate Table | Play / Pause sample audition |
+| **`↑` / `↓`** | Crate Table | Select previous / next sample |
+| **`Ctrl + ↑` / `Ctrl + ↓`** | Crate Table | Reorder selected sample pad position (`01–16`) |
+| **`Delete` / `Backspace`** | Crate Table | Remove selected sample from staged crate |
+| **`Escape`** | Crate Search | Clear active search filter |
+| **`↕` Left-Click** | Pad Order Column | Move pad up |
+| **`↕` Right-Click** | Pad Order Column | Move pad down |
+| **Click / Drag** | Waveform Strip | Scrub playhead position |
 
-For Linux to talk to the SP-404 without proprietary drivers, the unit needs to be in class-compliant mode:
+### Monitor Deck
+| Control | Action |
+| :--- | :--- |
+| **`● CLIP`** | Resets latched audio overload indicator |
+| **`↺ 100% (0 dB)`** | Resets monitor gain fader to unity gain |
+| **`Mute`** | Toggles local monitor audio output |
 
-1. On the SP-404MKII, press **[SHIFT] + [PAD 13] (UTILITY)**.
-2. Select **SYSTEM** and check:
-   - **USB Driver:** Must be set to **`GENERIC`** (not `VENDOR`).
-   - **USB IN:** Set to **`MIX OUT`** so your internal pads, effects, and patterns are sent over USB.
+---
 
-### 2. Run the App
+## Supported Audio Formats
 
-#### Pre-built Binaries (All Linux Distros)
-Download the latest `sp404-streamer-x86_64.AppImage` (or `sp404-streamer-x86_64-linux.tar.gz`) from [Releases](https://github.com/cntrvsy/sp404-streamer/releases):
+Decoded natively using pure-Rust decoders (Symphonia) without external library dependencies:
+- **WAV** (Linear PCM 16/24/32-bit, IEEE Float)
+- **AIFF** / **AIFC**
+- **FLAC** (Lossless)
+- **MP3** (MPEG-1/2 Audio Layer III)
+- **OGG Vorbis**
+- **OPUS**
+
+---
+
+## SP-404MKII Conforming Specifications
+
+Exported samples are conformed to Roland hardware standards:
+- **48,000 Hz / 24-Bit Linear PCM:** The native internal sample rate of the SP-404MKII DSP, bypassing hardware conversion latency during import.
+- **Polyphony Preservation:** True mono sources remain single-channel mono files, saving 50% hardware voice allocation (1 voice instead of 2 voices for stereo against the 32-voice limit).
+- **OLED Display Sanitization:** Strips FAT32 illegal characters (`/ \ : * ? " < > |`) and truncates names to 16 characters to prevent sluggish marquee scrolling on the SP-404 display.
+- **Pad Auto-Numbering:** Prefixes filenames with `01_` through `16_` for automatic pad assignment when importing kits via the SP-404 utility menu.
+- **Peak Normalization:** Optional true-peak normalization (default: `-0.5 dBFS`).
+
+---
+
+## Setup & Usage
+
+### 1. Hardware Configuration (One-Time)
+Configure the SP-404MKII for class-compliant USB audio on Linux:
+1. Press **[SHIFT] + [PAD 13] (UTILITY)**.
+2. Navigate to **SYSTEM** and verify:
+   - **USB Driver:** Set to **`GENERIC`** (not `VENDOR`).
+   - **USB IN:** Set to **`MIX OUT`** to route pads, effects, and patterns over USB.
+
+### 2. Streaming to Discord or Vesktop
+1. Connect the SP-404MKII to your PC via USB-C.
+2. Launch `sp404-streamer`.
+3. In Discord or Vesktop, join a voice channel and click **Share Screen**.
+4. Select the **SP-404MKII Streamer** window and ensure **"Also share audio"** is checked.
+
+---
+
+## Installation & Building
+
+### Pre-built Binaries
+Download the latest `sp404-streamer-x86_64.AppImage` from [Releases](https://github.com/cntrvsy/sp404-streamer/releases):
 
 ```bash
 chmod +x sp404-streamer-x86_64.AppImage
 ./sp404-streamer-x86_64.AppImage
 ```
 
-#### Build Locally
-If you have Rust and PipeWire installed, you can build and run directly with Cargo:
+### Building from Source
 
-```bash
-cargo run --release
-```
-
-To install it to your user environment (`~/.cargo/bin`):
-
-```bash
-cargo install --path .
-```
-
-### 3. Stream to Discord
-
-1. Open **Discord** (or **Vesktop** on Wayland).
-2. Join a voice channel and click **Share Screen**.
-3. Under the **Window** tab, select **SP-404MKII Streamer**.
-4. Make sure **"Also share audio"** is checked.
-5. Hit your pads! Your friends will hear your beats in high-fidelity stereo.
-
----
-
-## Building from Source
-
-To compile from source, you only need Rust and the PipeWire development headers:
-
+#### Dependencies
 ```bash
 # Arch Linux / CachyOS / Manjaro
 sudo pacman -S pipewire clang wayland libxkbcommon
@@ -113,39 +120,52 @@ sudo pacman -S pipewire clang wayland libxkbcommon
 # Fedora
 sudo dnf install pipewire-devel clang wayland-devel libxkbcommon-devel
 
-# Ubuntu (24.04+) / Debian (12+) [requires PipeWire >= 0.3.50]
+# Ubuntu (24.04+) / Debian (12+)
 sudo apt install libpipewire-0.3-dev libspa-0.2-dev libclang-dev libwayland-dev libxkbcommon-dev
+```
 
-# Build release binary
-cargo build --release
+#### Build & Run
+```bash
+# Run in development mode
+cargo run --release
+
+# Install binary to ~/.cargo/bin
+cargo install --path .
+```
+
+#### Developer Workflow
+This repository includes a preconfigured [`.bacon.toml`](.bacon.toml) for background compilation, clippy lint checks, and testing:
+```bash
+bacon clippy
+bacon test
 ```
 
 ---
 
-## Optional: Wayland Window Rules
+## Compositor Window Rules (Wayland)
 
-If you use a tiling or dynamic Wayland compositor (like `niri`, `Hyprland`, or `Sway`), you can set a floating rule for the window so it sits neatly in the corner of your screen:
+For tiling and dynamic Wayland compositors (`niri`, `Hyprland`, `Sway`), configure floating window rules matching the default dimensions (`480x545`):
 
-**Niri (`~/.config/niri/config.kdl`):**
-
+### Niri (`~/.config/niri/config.kdl`)
 ```kdl
 window-rule {
     match app-id="sp404-streamer"
     open-floating true
-    default-column-width { fixed 370; }
-    default-window-height { fixed 255; }
+    default-column-width { fixed 480; }
+    default-window-height { fixed 545; }
 }
 ```
 
-**Hyprland (`~/.config/hypr/hyprland.conf`):**
-
+### Hyprland (`~/.config/hypr/hyprland.conf`)
 ```ini
 windowrulev2 = float, class:^(sp404-streamer)$
-windowrulev2 = size 370 255, class:^(sp404-streamer)$
+windowrulev2 = size 480 545, class:^(sp404-streamer)$
 ```
 
 ---
 
 ## License
 
-MIT
+Distributed under the [MIT License](LICENSE).
+
+Developed by [frStudios](https://frstudios.co.ke/).

@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText, Stroke, Ui, Vec2};
@@ -14,7 +14,7 @@ use tracing::{error, warn};
 
 use crate::audio::PreviewPlayer;
 use crate::sample_crate::conformer::{
-    decode_audio_file, export_conformed_wav, stage_audio_file, DecodedAudio,
+    DecodedAudio, decode_audio_file, export_conformed_wav, stage_audio_file,
 };
 use crate::sample_crate::model::{ConformOptions, SdCardInfo, StagedSample, UnmountedCard};
 use crate::sample_crate::sd_detector::{detect_sd_card_full, safe_eject};
@@ -131,9 +131,10 @@ impl CrateState {
             files.sort();
 
             if self.staged_samples.is_empty()
-                && let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                    self.target_folder_name = dir_name.to_string();
-                }
+                && let Some(dir_name) = path.file_name().and_then(|n| n.to_str())
+            {
+                self.target_folder_name = dir_name.to_string();
+            }
 
             for f in files {
                 self.stage_single_file(&f);
@@ -217,9 +218,8 @@ fn handle_keyboard_shortcuts(ui: &mut Ui, state: &mut CrateState, preview_player
     let up_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
     let esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
     let ctrl_held = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-    let del_pressed = ui.input(|i| {
-        i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)
-    });
+    let del_pressed =
+        ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
 
     if esc_pressed && !state.search_filter.is_empty() {
         state.search_filter.clear();
@@ -229,13 +229,15 @@ fn handle_keyboard_shortcuts(ui: &mut Ui, state: &mut CrateState, preview_player
 
     if ctrl_held {
         // Reordering samples in kit sequence via Ctrl+Up / Ctrl+Down
-        if down_pressed && let Some(idx) = state.selected_index
+        if down_pressed
+            && let Some(idx) = state.selected_index
             && idx + 1 < n_samples
         {
             state.staged_samples.swap(idx, idx + 1);
             state.selected_index = Some(idx + 1);
         }
-        if up_pressed && let Some(idx) = state.selected_index
+        if up_pressed
+            && let Some(idx) = state.selected_index
             && idx > 0
         {
             state.staged_samples.swap(idx, idx - 1);
@@ -262,53 +264,53 @@ fn handle_keyboard_shortcuts(ui: &mut Ui, state: &mut CrateState, preview_player
 
     if del_pressed
         && let Some(idx) = state.selected_index
-            && idx < state.staged_samples.len() {
-                preview_player.stop();
-                state.staged_samples.remove(idx);
-                if state.staged_samples.is_empty() {
-                    state.selected_index = None;
-                } else {
-                    state.selected_index = Some(idx.min(state.staged_samples.len() - 1));
-                }
-            }
+        && idx < state.staged_samples.len()
+    {
+        preview_player.stop();
+        state.staged_samples.remove(idx);
+        if state.staged_samples.is_empty() {
+            state.selected_index = None;
+        } else {
+            state.selected_index = Some(idx.min(state.staged_samples.len() - 1));
+        }
+    }
 
     if space_pressed
         && let Some(idx) = state.selected_index
-            && let Some(sample) = state.staged_samples.get(idx) {
-                if preview_player.is_playing() {
-                    preview_player.stop();
-                } else {
-                    let path = sample.source_path.clone();
-                    let cache = Arc::clone(&state.decoded_cache);
+        && let Some(sample) = state.staged_samples.get(idx)
+    {
+        if preview_player.is_playing() {
+            preview_player.stop();
+        } else {
+            let path = sample.source_path.clone();
+            let cache = Arc::clone(&state.decoded_cache);
 
-                    // Check cache or decode
-                    let audio = {
-                        let read = cache.read();
-                        read.get(&path).cloned()
-                    };
+            // Check cache or decode
+            let audio = {
+                let read = cache.read();
+                read.get(&path).cloned()
+            };
 
-                    let audio_to_play = audio.unwrap_or_else(|| {
-                        match decode_audio_file(&path) {
-                            Ok(decoded) => {
-                                cache.write().insert(path, decoded.clone());
-                                decoded
-                            }
-                            Err(e) => {
-                                error!("Failed to decode for preview: {e}");
-                                DecodedAudio {
-                                    channels: 1,
-                                    sample_rate: 48000,
-                                    samples: vec![Vec::new()],
-                                }
-                            }
-                        }
-                    });
-
-                    if !audio_to_play.samples.is_empty() && !audio_to_play.samples[0].is_empty() {
-                        preview_player.play(audio_to_play);
+            let audio_to_play = audio.unwrap_or_else(|| match decode_audio_file(&path) {
+                Ok(decoded) => {
+                    cache.write().insert(path, decoded.clone());
+                    decoded
+                }
+                Err(e) => {
+                    error!("Failed to decode for preview: {e}");
+                    DecodedAudio {
+                        channels: 1,
+                        sample_rate: 48000,
+                        samples: vec![Vec::new()],
                     }
                 }
+            });
+
+            if !audio_to_play.samples.is_empty() && !audio_to_play.samples[0].is_empty() {
+                preview_player.play(audio_to_play);
             }
+        }
+    }
 }
 
 fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
@@ -322,7 +324,11 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             if let Some(ref sd) = state.detected_sd {
-                ui.label(RichText::new("●").color(RolandTheme::METER_GREEN).size(12.0));
+                ui.label(
+                    RichText::new("●")
+                        .color(RolandTheme::METER_GREEN)
+                        .size(12.0),
+                );
                 ui.label(
                     RichText::new(format!("SP-404 SD: {}", sd.label))
                         .color(RolandTheme::TEXT_PRIMARY)
@@ -356,7 +362,11 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let eject_btn = ui.add_enabled(
                         !is_exporting,
-                        egui::Button::new(RichText::new("Eject Card").color(RolandTheme::TEXT_PRIMARY).size(11.0)),
+                        egui::Button::new(
+                            RichText::new("Eject Card")
+                                .color(RolandTheme::TEXT_PRIMARY)
+                                .size(11.0),
+                        ),
                     );
                     if is_exporting {
                         eject_btn.on_hover_text("Cannot eject while export is in progress");
@@ -365,12 +375,19 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
                     }
                 });
             } else if let Some(unmounted) = state.unmounted_cards.first() {
-                ui.label(RichText::new("○").color(RolandTheme::ACCENT_AMBER).size(12.0));
                 ui.label(
-                    RichText::new(format!("CARD DETECTED: {} ({})", unmounted.device_node, unmounted.label))
+                    RichText::new("○")
                         .color(RolandTheme::ACCENT_AMBER)
-                        .monospace()
-                        .size(10.5),
+                        .size(12.0),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "CARD DETECTED: {} ({})",
+                        unmounted.device_node, unmounted.label
+                    ))
+                    .color(RolandTheme::ACCENT_AMBER)
+                    .monospace()
+                    .size(10.5),
                 );
 
                 if ui
@@ -391,7 +408,12 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
                     }
 
                     if ui
-                        .button(RichText::new("Mount Card").color(RolandTheme::ACCENT_ORANGE).strong().size(11.0))
+                        .button(
+                            RichText::new("Mount Card")
+                                .color(RolandTheme::ACCENT_ORANGE)
+                                .strong()
+                                .size(11.0),
+                        )
                         .on_hover_text("Mount this card partition into the system via udisks2")
                         .clicked()
                     {
@@ -399,7 +421,11 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
                     }
                 });
             } else {
-                ui.label(RichText::new("○").color(Color32::from_rgb(120, 125, 140)).size(12.0));
+                ui.label(
+                    RichText::new("○")
+                        .color(Color32::from_rgb(120, 125, 140))
+                        .size(12.0),
+                );
                 ui.label(
                     RichText::new("NO SD CARD MOUNTED (Insert card or select directory)")
                         .color(RolandTheme::TEXT_MUTED)
@@ -434,17 +460,15 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
     if let Some(dev) = mount_candidate_dev {
         match crate::sample_crate::sd_detector::mount_block_device(&dev) {
             Ok(mount_path) => {
-                let import_path = crate::sample_crate::sd_detector::resolve_import_path(&mount_path);
+                let import_path =
+                    crate::sample_crate::sd_detector::resolve_import_path(&mount_path);
                 state.detected_sd = crate::sample_crate::sd_detector::build_sd_info(
                     &mount_path,
                     &import_path,
                     Some(&dev),
                 );
                 state.unmounted_cards.clear();
-                state.status_message = Some((
-                    "✓ SD Card mounted successfully.".into(),
-                    false,
-                ));
+                state.status_message = Some(("✓ SD Card mounted successfully.".into(), false));
             }
             Err(e) => {
                 state.status_message = Some((format!("Failed to mount {dev}: {e}"), true));
@@ -471,11 +495,8 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
 
     if let Some(path) = browse_folder {
         let import_path = crate::sample_crate::sd_detector::resolve_import_path(&path);
-        state.detected_sd = crate::sample_crate::sd_detector::build_sd_info(
-            &path,
-            &import_path,
-            None,
-        );
+        state.detected_sd =
+            crate::sample_crate::sd_detector::build_sd_info(&path, &import_path, None);
     }
 }
 
@@ -484,7 +505,9 @@ fn open_add_files_dialog(state: &mut CrateState) {
         .set_title("Select Audio Samples (Hold Ctrl or Shift to select multiple)")
         .add_filter(
             "Audio Files (*.wav, *.mp3, *.flac, *.aiff, *.ogg, *.opus)",
-            &["wav", "mp3", "flac", "aif", "aiff", "ogg", "opus", "m4a", "aac"],
+            &[
+                "wav", "mp3", "flac", "aif", "aiff", "ogg", "opus", "m4a", "aac",
+            ],
         )
         .add_filter("All Files (*.*)", &["*"]);
 
@@ -910,19 +933,27 @@ fn render_export_deck(ui: &mut Ui, state: &mut CrateState) {
     let is_exporting = export_progress.is_exporting();
 
     let (has_sd, is_ro, free_bytes, target_prefix_label) = if let Some(ref sd) = state.detected_sd {
-        (true, sd.is_read_only, sd.free_bytes, format!("Target: {}/", sd.relative_import_path()))
+        (
+            true,
+            sd.is_read_only,
+            sd.free_bytes,
+            format!("Target: {}/", sd.relative_import_path()),
+        )
     } else {
         (false, false, 0, "Target Folder: IMPORT/".to_string())
     };
 
     let total_duration: f32 = state.staged_samples.iter().map(|s| s.duration_secs).sum();
     let req_bytes = (total_duration * 192_000.0 * 1.05) as u64;
-    let is_space_insufficient = has_sd && !state.staged_samples.is_empty() && free_bytes < req_bytes;
+    let is_space_insufficient =
+        has_sd && !state.staged_samples.is_empty() && free_bytes < req_bytes;
 
     let clean_folder = state.target_folder_name.trim().to_string();
     let is_folder_valid = !clean_folder.is_empty()
         && clean_folder.len() <= 16
-        && !clean_folder.chars().any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'));
+        && !clean_folder
+            .chars()
+            .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'));
 
     RolandTheme::rack_card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -1080,7 +1111,11 @@ fn render_export_deck(ui: &mut Ui, state: &mut CrateState) {
 }
 
 fn render_export_button(ui: &mut Ui, can_export: bool, state: &mut CrateState) {
-    let is_ro = state.detected_sd.as_ref().map(|sd| sd.is_read_only).unwrap_or(false);
+    let is_ro = state
+        .detected_sd
+        .as_ref()
+        .map(|sd| sd.is_read_only)
+        .unwrap_or(false);
     let btn_text = if state.detected_sd.is_none() {
         "No SD Card Mounted"
     } else if is_ro {
@@ -1092,12 +1127,13 @@ fn render_export_button(ui: &mut Ui, can_export: bool, state: &mut CrateState) {
     };
 
     let btn_width = ui.available_width();
-    let export_btn = egui::Button::new(
-        RichText::new(btn_text)
-            .strong()
-            .size(11.5)
-            .color(if can_export { RolandTheme::TEXT_ON_ACCENT } else { RolandTheme::TEXT_MUTED })
-    )
+    let export_btn = egui::Button::new(RichText::new(btn_text).strong().size(11.5).color(
+        if can_export {
+            RolandTheme::TEXT_ON_ACCENT
+        } else {
+            RolandTheme::TEXT_MUTED
+        },
+    ))
     .min_size(Vec2::new(btn_width, 28.0));
 
     if ui.add_enabled(can_export, export_btn).clicked() {
@@ -1175,10 +1211,8 @@ fn execute_export(state: &mut CrateState) {
 
             let dest_file = target_dir.join(file_name);
             if let Err(e) = export_conformed_wav(&audio, &dest_file, &options) {
-                *export_status.lock() = ExportProgress::Error(format!(
-                    "Failed to export {}: {e}",
-                    sample.clean_name
-                ));
+                *export_status.lock() =
+                    ExportProgress::Error(format!("Failed to export {}: {e}", sample.clean_name));
                 return;
             }
 

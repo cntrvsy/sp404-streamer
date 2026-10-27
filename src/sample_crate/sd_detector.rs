@@ -154,7 +154,11 @@ pub fn scan_for_unmounted_cards() -> Vec<UnmountedCard> {
 
         unmounted.push(UnmountedCard {
             device_node,
-            label: if label.is_empty() { "SD Card".to_string() } else { label },
+            label: if label.is_empty() {
+                "SD Card".to_string()
+            } else {
+                label
+            },
             fstype,
             size_formatted: size,
         });
@@ -241,10 +245,15 @@ pub fn detect_sd_card_full() -> SdDetectionStatus {
     for candidate in &unmounted {
         let lbl = candidate.label.to_uppercase();
         if lbl.contains("SP404") || lbl.contains("SP-404") || lbl.contains("ROLAND") {
-            info!("Found unmounted SP-404 card at {}. Auto-mounting...", candidate.device_node);
+            info!(
+                "Found unmounted SP-404 card at {}. Auto-mounting...",
+                candidate.device_node
+            );
             if let Ok(mount_path) = mount_block_device(&candidate.device_node) {
                 let import_path = resolve_import_path(&mount_path);
-                if let Some(card) = build_sd_info(&mount_path, &import_path, Some(&candidate.device_node)) {
+                if let Some(card) =
+                    build_sd_info(&mount_path, &import_path, Some(&candidate.device_node))
+                {
                     return SdDetectionStatus {
                         card: Some(card),
                         unmounted_candidates: Vec::new(),
@@ -277,14 +286,15 @@ pub fn find_mounted_sd_card() -> Option<SdCardInfo> {
     for root in &media_roots {
         let p = Path::new(root);
         if p.is_dir()
-            && let Ok(entries) = fs::read_dir(p) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() && !candidate_mounts.contains(&path) {
-                        candidate_mounts.push(path);
-                    }
+            && let Ok(entries) = fs::read_dir(p)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && !candidate_mounts.contains(&path) {
+                    candidate_mounts.push(path);
                 }
             }
+        }
     }
 
     // 2. Scan /proc/mounts for vfat / exfat mounts
@@ -359,14 +369,16 @@ pub fn build_sd_info(
 
     let mut existing_kits = Vec::new();
     if import_path.is_dir()
-        && let Ok(entries) = fs::read_dir(import_path) {
-            for entry in entries.flatten() {
-                if entry.path().is_dir()
-                    && let Some(name) = entry.file_name().to_str() {
-                        existing_kits.push(name.to_string());
-                    }
+        && let Ok(entries) = fs::read_dir(import_path)
+    {
+        for entry in entries.flatten() {
+            if entry.path().is_dir()
+                && let Some(name) = entry.file_name().to_str()
+            {
+                existing_kits.push(name.to_string());
             }
         }
+    }
     existing_kits.sort();
 
     Some(SdCardInfo {
@@ -406,7 +418,10 @@ fn get_filesystem_capacity(path: &Path) -> Result<FilesystemCapacity, StorageErr
 
 /// Flushes kernel write buffers and safely unmounts the SD card partition via udisksctl or umount.
 pub fn safe_eject(mount_path: &Path, device_node: Option<&str>) -> Result<(), StorageError> {
-    info!("Flushing write buffers to SD card at {}...", mount_path.display());
+    info!(
+        "Flushing write buffers to SD card at {}...",
+        mount_path.display()
+    );
 
     // 1. Flush kernel filesystem write buffers
     unsafe {
@@ -425,10 +440,11 @@ pub fn safe_eject(mount_path: &Path, device_node: Option<&str>) -> Result<(), St
             .output();
 
         if let Ok(output) = udisks_res
-            && output.status.success() {
-                info!("Successfully unmounted SD card via udisksctl.");
-                return Ok(());
-            }
+            && output.status.success()
+        {
+            info!("Successfully unmounted SD card via udisksctl.");
+            return Ok(());
+        }
     }
 
     // 3. Fallback: try standard umount

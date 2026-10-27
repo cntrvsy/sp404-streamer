@@ -131,10 +131,7 @@ impl PortManager {
     }
 
     /// Pure parser: Extracts Left and Right playback ports for a target sink.
-    pub fn extract_sink_playback_ports(
-        stdout: &str,
-        sink_name: &str,
-    ) -> Option<StereoPorts> {
+    pub fn extract_sink_playback_ports(stdout: &str, sink_name: &str) -> Option<StereoPorts> {
         let prefix = format!("{sink_name}:");
         let mut sink_fl = None;
         let mut sink_fr = None;
@@ -207,10 +204,14 @@ impl PortManager {
             let fr_src = format!("{stream_node_name}:output_FR");
 
             info!("Linking Playback: {} -> {}", fl_src, ports.left);
-            let _ = Command::new("pw-link").args([&fl_src, &ports.left]).output();
+            let _ = Command::new("pw-link")
+                .args([&fl_src, &ports.left])
+                .output();
 
             info!("Linking Playback: {} -> {}", fr_src, ports.right);
-            let _ = Command::new("pw-link").args([&fr_src, &ports.right]).output();
+            let _ = Command::new("pw-link")
+                .args([&fr_src, &ports.right])
+                .output();
         } else {
             warn!("Could not identify playback ports for sink: {}", sink_name);
         }
@@ -223,10 +224,7 @@ impl PortManager {
     }
 
     /// Pure parser: Discovers Left and Right capture output ports for an SP-404 node.
-    pub fn extract_sp404_ports(
-        stdout: &str,
-        sp404_node_name: &str,
-    ) -> Option<StereoPorts> {
+    pub fn extract_sp404_ports(stdout: &str, sp404_node_name: &str) -> Option<StereoPorts> {
         let prefix = format!("{sp404_node_name}:");
         let mut sp_fl = None;
         let mut sp_fr = None;
@@ -509,8 +507,10 @@ alsa_input.usb-Blue_Yeti_00-00.analog-stereo:capture_FL
         assert_eq!(
             ports,
             Some(StereoPorts {
-                left: "alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FL".to_string(),
-                right: "alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FR".to_string(),
+                left: "alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FL"
+                    .to_string(),
+                right: "alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FR"
+                    .to_string(),
             })
         );
     }

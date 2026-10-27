@@ -155,7 +155,9 @@ impl eframe::App for Sp404StreamerApp {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     for tab in AppTab::iter() {
-                        if RolandTheme::tab_button(ui, self.current_tab == tab, tab.into()).clicked() {
+                        if RolandTheme::tab_button(ui, self.current_tab == tab, tab.into())
+                            .clicked()
+                        {
                             self.current_tab = tab;
                         }
                     }
@@ -175,14 +177,14 @@ impl eframe::App for Sp404StreamerApp {
                             RichText::new("SP-404MKII")
                                 .color(RolandTheme::ACCENT_ORANGE)
                                 .strong()
-                        .size(13.5),
-                );
-                ui.label(
-                    RichText::new("STUDIO BRIDGE")
-                        .color(RolandTheme::TEXT_SECONDARY)
-                        .size(11.0)
-                        .monospace(),
-                );
+                                .size(13.5),
+                        );
+                        ui.label(
+                            RichText::new("STUDIO BRIDGE")
+                                .color(RolandTheme::TEXT_SECONDARY)
+                                .size(11.0)
+                                .monospace(),
+                        );
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if is_connected {
@@ -190,7 +192,8 @@ impl eframe::App for Sp404StreamerApp {
                                     .small_button("↻")
                                     .on_hover_text("Refresh PipeWire audio links to SP-404MKII")
                                     .clicked()
-                                    && let Some(node_name) = self.state.sp404_node_name.read().clone()
+                                    && let Some(node_name) =
+                                        self.state.sp404_node_name.read().clone()
                                 {
                                     let _ = self.command_sender.send(AudioCommand::LinkCapture {
                                         sp404_node: node_name,
@@ -203,7 +206,11 @@ impl eframe::App for Sp404StreamerApp {
                                     .inner_margin(egui::Margin::symmetric(6, 2))
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
-                                            ui.label(RichText::new("●").color(RolandTheme::METER_GREEN).size(9.0));
+                                            ui.label(
+                                                RichText::new("●")
+                                                    .color(RolandTheme::METER_GREEN)
+                                                    .size(9.0),
+                                            );
                                             ui.label(
                                                 RichText::new("48kHz • 24-BIT • PipeWire Native")
                                                     .color(RolandTheme::METER_GREEN)
@@ -221,7 +228,11 @@ impl eframe::App for Sp404StreamerApp {
                                     .inner_margin(egui::Margin::symmetric(6, 2))
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
-                                            ui.label(RichText::new("○").color(RolandTheme::ACCENT_AMBER).size(9.0));
+                                            ui.label(
+                                                RichText::new("○")
+                                                    .color(RolandTheme::ACCENT_AMBER)
+                                                    .size(9.0),
+                                            );
                                             ui.label(
                                                 RichText::new("SCANNING USB")
                                                     .color(RolandTheme::ACCENT_AMBER)
@@ -239,7 +250,8 @@ impl eframe::App for Sp404StreamerApp {
                     let status_str = if is_connected {
                         format!("DEVICE: {device_desc} | USB Mix Out Linked")
                     } else {
-                        "USB Mix Out not detected. Connect SP-404MKII via USB-C (System: Generic)".to_string()
+                        "USB Mix Out not detected. Connect SP-404MKII via USB-C (System: Generic)"
+                            .to_string()
                     };
 
                     ui.label(
@@ -250,222 +262,232 @@ impl eframe::App for Sp404StreamerApp {
                     );
                 });
 
-        ui.add_space(8.0);
+                ui.add_space(8.0);
 
-        // ====================================================================
-        // RACK CARD 2: Precision Master Metering Deck
-        // ====================================================================
-        RolandTheme::rack_card_frame().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("MASTER INPUT LEVEL")
-                        .size(9.5)
-                        .color(RolandTheme::TEXT_MUTED)
-                        .monospace(),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let peak_max = cur_l.max(cur_r);
-                    let peak_color = if peak_max >= -0.1 {
-                        RolandTheme::METER_RED
-                    } else if peak_max >= -12.0 {
-                        RolandTheme::METER_AMBER
-                    } else {
-                        RolandTheme::TEXT_MUTED
-                    };
-                    let peak_str = if peak_max <= -59.5 {
-                        "MAX PEAK: -∞ dB".to_string()
-                    } else {
-                        format!("MAX PEAK: {peak_max:.1} dBFS")
-                    };
-                    ui.label(
-                        RichText::new(peak_str)
-                            .size(9.0)
-                            .color(peak_color)
-                            .monospace(),
-                    );
+                // ====================================================================
+                // RACK CARD 2: Precision Master Metering Deck
+                // ====================================================================
+                RolandTheme::rack_card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("MASTER INPUT LEVEL")
+                                .size(9.5)
+                                .color(RolandTheme::TEXT_MUTED)
+                                .monospace(),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let peak_max = cur_l.max(cur_r);
+                            let peak_color = if peak_max >= -0.1 {
+                                RolandTheme::METER_RED
+                            } else if peak_max >= -12.0 {
+                                RolandTheme::METER_AMBER
+                            } else {
+                                RolandTheme::TEXT_MUTED
+                            };
+                            let peak_str = if peak_max <= -59.5 {
+                                "MAX PEAK: -∞ dB".to_string()
+                            } else {
+                                format!("MAX PEAK: {peak_max:.1} dBFS")
+                            };
+                            ui.label(
+                                RichText::new(peak_str)
+                                    .size(9.0)
+                                    .color(peak_color)
+                                    .monospace(),
+                            );
+                        });
+                    });
+
+                    ui.add_space(4.0);
+                    let meter_w = ui.available_width();
+                    VuMeterWidget::new("L", cur_l, self.peak_hold_l, is_clipped_l)
+                        .ui(ui, meter_w, 18.0);
+                    ui.add_space(3.0);
+                    VuMeterWidget::new("R", cur_r, self.peak_hold_r, is_clipped_r)
+                        .ui(ui, meter_w, 18.0);
+                    ui.add_space(2.0);
+                    VuMeterWidget::draw_scale(ui, meter_w, 14.0);
                 });
-            });
 
-            ui.add_space(4.0);
-            let meter_w = ui.available_width();
-            VuMeterWidget::new("L", cur_l, self.peak_hold_l, is_clipped_l).ui(ui, meter_w, 18.0);
-            ui.add_space(3.0);
-            VuMeterWidget::new("R", cur_r, self.peak_hold_r, is_clipped_r).ui(ui, meter_w, 18.0);
-            ui.add_space(2.0);
-            VuMeterWidget::draw_scale(ui, meter_w, 14.0);
-        });
+                ui.add_space(8.0);
 
-        ui.add_space(8.0);
+                // ====================================================================
+                // RACK CARD 3: Output Routing & Monitor Console
+                // ====================================================================
+                RolandTheme::rack_card_frame().show(ui, |ui| {
+                    // 1. MONITOR VOLUME HEADER ROW
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("MONITOR OUTPUT")
+                                .size(10.5)
+                                .monospace()
+                                .strong()
+                                .color(RolandTheme::TEXT_PRIMARY),
+                        );
 
-        // ====================================================================
-        // RACK CARD 3: Output Routing & Monitor Console
-        // ====================================================================
-        RolandTheme::rack_card_frame().show(ui, |ui| {
-            // 1. MONITOR VOLUME HEADER ROW
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("MONITOR OUTPUT")
-                        .size(10.5)
-                        .monospace()
-                        .strong()
-                        .color(RolandTheme::TEXT_PRIMARY),
-                );
-
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    // Quick Reset / Snap to 100% Unity Button
-                    if ui
-                        .small_button("0 dB Unity")
-                        .on_hover_text("Reset monitor volume to 100% (0 dB Unity Gain)")
-                        .clicked()
-                    {
-                        self.volume_percent = 100.0;
-                        self.state.set_monitor_gain(1.0);
-                    }
-
-                    let (chip_color, chip_text) = if self.volume_percent <= 0.01 {
-                        (RolandTheme::METER_RED, "MUTED (0%)".to_string())
-                    } else if (self.volume_percent - 100.0).abs() < 0.5 {
-                        (RolandTheme::ACCENT_AMBER, "100% (0.0 dB)".to_string())
-                    } else {
-                        let db = 20.0 * (self.volume_percent / 100.0).log10();
-                        (RolandTheme::TEXT_PRIMARY, format!("{:.0}% ({:+0.1} dB)", self.volume_percent, db))
-                    };
-
-                    ui.label(
-                        RichText::new(format!("[ {chip_text} ]"))
-                            .size(10.0)
-                            .monospace()
-                            .strong()
-                            .color(chip_color),
-                    );
-                });
-            });
-
-            ui.add_space(3.0);
-
-            // 2. UNMISTAKABLE FULL-WIDTH FADER SLIDER
-            let fader_width = ui.available_width();
-            let slider = Slider::new(&mut self.volume_percent, 0.0..=150.0)
-                .trailing_fill(true)
-                .show_value(false);
-
-            if ui.add_sized(Vec2::new(fader_width, 22.0), slider).changed() {
-                let gain = self.volume_percent / 100.0;
-                self.state.set_monitor_gain(gain);
-            }
-
-            ui.add_space(6.0);
-
-            // 3. AUDIO OUTPUT SINK SELECTOR
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("AUDIO SINK:")
-                        .size(10.0)
-                        .monospace()
-                        .color(RolandTheme::TEXT_MUTED),
-                );
-                let current_sink = self.state.selected_sink_name.read().clone();
-                let available = self.state.available_sinks.read().clone();
-
-                let display_text = match &current_sink {
-                    None => "System Default (Follow OS)".to_string(),
-                    Some(name) => available
-                        .iter()
-                        .find(|s| &s.name == name)
-                        .map(|s| s.description.clone())
-                        .unwrap_or_else(|| name.clone()),
-                };
-
-                let combo_width = (ui.available_width() - 32.0).max(100.0);
-                egui::ComboBox::from_id_salt("output_sink_selector")
-                    .selected_text(RichText::new(display_text).size(10.5))
-                    .width(combo_width)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(current_sink.is_none(), "System Default (Follow OS)")
-                            .clicked()
-                        {
-                            let _ = self
-                                .command_sender
-                                .send(AudioCommand::RoutePlayback { sink_name: None });
-                        }
-                        for sink in &available {
-                            let is_selected = current_sink.as_deref() == Some(&sink.name);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            // Quick Reset / Snap to 100% Unity Button
                             if ui
-                                .selectable_label(is_selected, &sink.description)
+                                .small_button("0 dB Unity")
+                                .on_hover_text("Reset monitor volume to 100% (0 dB Unity Gain)")
                                 .clicked()
                             {
-                                let _ = self.command_sender.send(AudioCommand::RoutePlayback {
-                                    sink_name: Some(sink.name.clone()),
-                                });
+                                self.volume_percent = 100.0;
+                                self.state.set_monitor_gain(1.0);
                             }
+
+                            let (chip_color, chip_text) = if self.volume_percent <= 0.01 {
+                                (RolandTheme::METER_RED, "MUTED (0%)".to_string())
+                            } else if (self.volume_percent - 100.0).abs() < 0.5 {
+                                (RolandTheme::ACCENT_AMBER, "100% (0.0 dB)".to_string())
+                            } else {
+                                let db = 20.0 * (self.volume_percent / 100.0).log10();
+                                (
+                                    RolandTheme::TEXT_PRIMARY,
+                                    format!("{:.0}% ({:+0.1} dB)", self.volume_percent, db),
+                                )
+                            };
+
+                            ui.label(
+                                RichText::new(format!("[ {chip_text} ]"))
+                                    .size(10.0)
+                                    .monospace()
+                                    .strong()
+                                    .color(chip_color),
+                            );
+                        });
+                    });
+
+                    ui.add_space(3.0);
+
+                    // 2. UNMISTAKABLE FULL-WIDTH FADER SLIDER
+                    let fader_width = ui.available_width();
+                    let slider = Slider::new(&mut self.volume_percent, 0.0..=150.0)
+                        .trailing_fill(true)
+                        .show_value(false);
+
+                    if ui.add_sized(Vec2::new(fader_width, 22.0), slider).changed() {
+                        let gain = self.volume_percent / 100.0;
+                        self.state.set_monitor_gain(gain);
+                    }
+
+                    ui.add_space(6.0);
+
+                    // 3. AUDIO OUTPUT SINK SELECTOR
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("AUDIO SINK:")
+                                .size(10.0)
+                                .monospace()
+                                .color(RolandTheme::TEXT_MUTED),
+                        );
+                        let current_sink = self.state.selected_sink_name.read().clone();
+                        let available = self.state.available_sinks.read().clone();
+
+                        let display_text = match &current_sink {
+                            None => "System Default (Follow OS)".to_string(),
+                            Some(name) => available
+                                .iter()
+                                .find(|s| &s.name == name)
+                                .map(|s| s.description.clone())
+                                .unwrap_or_else(|| name.clone()),
+                        };
+
+                        let combo_width = (ui.available_width() - 32.0).max(100.0);
+                        egui::ComboBox::from_id_salt("output_sink_selector")
+                            .selected_text(RichText::new(display_text).size(10.5))
+                            .width(combo_width)
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_label(
+                                        current_sink.is_none(),
+                                        "System Default (Follow OS)",
+                                    )
+                                    .clicked()
+                                {
+                                    let _ = self
+                                        .command_sender
+                                        .send(AudioCommand::RoutePlayback { sink_name: None });
+                                }
+                                for sink in &available {
+                                    let is_selected = current_sink.as_deref() == Some(&sink.name);
+                                    if ui
+                                        .selectable_label(is_selected, &sink.description)
+                                        .clicked()
+                                    {
+                                        let _ =
+                                            self.command_sender.send(AudioCommand::RoutePlayback {
+                                                sink_name: Some(sink.name.clone()),
+                                            });
+                                    }
+                                }
+                            });
+
+                        if ui
+                            .small_button("↻")
+                            .on_hover_text("Refresh audio output list")
+                            .clicked()
+                        {
+                            let _ = self.command_sender.send(AudioCommand::RefreshSinks);
                         }
                     });
 
-                if ui
-                    .small_button("↻")
-                    .on_hover_text("Refresh audio output list")
-                    .clicked()
-                {
-                    let _ = self.command_sender.send(AudioCommand::RefreshSinks);
-                }
-            });
+                    ui.add_space(6.0);
 
-            ui.add_space(6.0);
+                    // 4. UNAMBIGUOUS LOCAL PC MONITOR STATUS & ACTION
+                    let is_unlinked = self.state.is_local_monitor_unlinked();
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("PC OUTPUT:")
+                                .size(10.0)
+                                .monospace()
+                                .color(RolandTheme::TEXT_MUTED),
+                        );
 
-            // 4. UNAMBIGUOUS LOCAL PC MONITOR STATUS & ACTION
-            let is_unlinked = self.state.is_local_monitor_unlinked();
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("PC OUTPUT:")
-                        .size(10.0)
-                        .monospace()
-                        .color(RolandTheme::TEXT_MUTED),
-                );
+                        let (status_text, status_color, btn_label, btn_stroke_color) =
+                            if is_unlinked {
+                                (
+                                    "● MUTED",
+                                    RolandTheme::ACCENT_AMBER,
+                                    "🔊 Enable Pass-Through",
+                                    Color32::from_rgb(34, 197, 94),
+                                )
+                            } else {
+                                (
+                                    "● LIVE (PASS-THROUGH)",
+                                    RolandTheme::METER_GREEN,
+                                    "🔇 Mute Local Speakers",
+                                    Color32::from_rgb(239, 68, 68),
+                                )
+                            };
 
-                let (status_text, status_color, btn_label, btn_stroke_color) = if is_unlinked {
-                    (
-                        "● MUTED",
-                        RolandTheme::ACCENT_AMBER,
-                        "🔊 Enable Pass-Through",
-                        Color32::from_rgb(34, 197, 94),
-                    )
-                } else {
-                    (
-                        "● LIVE (PASS-THROUGH)",
-                        RolandTheme::METER_GREEN,
-                        "🔇 Mute Local Speakers",
-                        Color32::from_rgb(239, 68, 68),
-                    )
-                };
+                        ui.label(
+                            RichText::new(status_text)
+                                .size(10.0)
+                                .monospace()
+                                .strong()
+                                .color(status_color),
+                        );
 
-                ui.label(
-                    RichText::new(status_text)
-                        .size(10.0)
-                        .monospace()
-                        .strong()
-                        .color(status_color),
-                );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let btn = egui::Button::new(
+                                RichText::new(btn_label)
+                                    .size(10.0)
+                                    .monospace()
+                                    .strong()
+                                    .color(RolandTheme::TEXT_PRIMARY),
+                            )
+                            .stroke(Stroke::new(1.0, btn_stroke_color));
 
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let btn = egui::Button::new(
-                        RichText::new(btn_label)
-                            .size(10.0)
-                            .monospace()
-                            .strong()
-                            .color(RolandTheme::TEXT_PRIMARY),
-                    )
-                    .stroke(Stroke::new(1.0, btn_stroke_color));
-
-                    if ui.add(btn).clicked() {
-                        let new_unlinked = !is_unlinked;
-                        let _ = self
-                            .command_sender
-                            .send(AudioCommand::SetLocalMonitorMute(new_unlinked));
-                    }
+                            if ui.add(btn).clicked() {
+                                let new_unlinked = !is_unlinked;
+                                let _ = self
+                                    .command_sender
+                                    .send(AudioCommand::SetLocalMonitorMute(new_unlinked));
+                            }
+                        });
+                    });
                 });
-            });
-        });
             }
             AppTab::SampleCrate => {
                 crate_view::render_crate_view(ui, &mut self.crate_state, &self.preview_player);

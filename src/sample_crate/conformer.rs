@@ -12,7 +12,7 @@ use std::path::Path;
 use hound::{WavSpec, WavWriter};
 use rubato::{FastFixedIn, PolynomialDegree, Resampler};
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
@@ -85,7 +85,11 @@ impl DecodedAudio {
 
     /// Generates a normalized 512-bin high-resolution waveform overview (0.0 to 1.0)
     pub fn generate_waveform_overview(&self) -> Vec<f32> {
-        let n_frames = if self.samples.is_empty() { 0 } else { self.samples[0].len() };
+        let n_frames = if self.samples.is_empty() {
+            0
+        } else {
+            self.samples[0].len()
+        };
         if n_frames == 0 {
             return vec![0.0; WAVEFORM_BINS];
         }
@@ -220,10 +224,7 @@ pub fn decode_audio_file(path: &Path) -> Result<DecodedAudio, ConformerError> {
         .ok_or(ConformerError::NoAudioTrack)?;
 
     let track_id = track.id;
-    let sample_rate = track
-        .codec_params
-        .sample_rate
-        .unwrap_or(SP404_SAMPLE_RATE);
+    let sample_rate = track.codec_params.sample_rate.unwrap_or(SP404_SAMPLE_RATE);
     let channels = track
         .codec_params
         .channels
@@ -301,7 +302,11 @@ pub fn decode_audio_file(path: &Path) -> Result<DecodedAudio, ConformerError> {
 }
 
 /// Analyzes an audio file and creates a `StagedSample` with waveform and peak metadata.
-pub fn stage_audio_file(id: u64, path: &Path, max_name_len: usize) -> Result<StagedSample, ConformerError> {
+pub fn stage_audio_file(
+    id: u64,
+    path: &Path,
+    max_name_len: usize,
+) -> Result<StagedSample, ConformerError> {
     let audio = decode_audio_file(path)?;
     let clean_name = sanitize_filename(path, max_name_len);
     let duration_secs = audio.duration_secs();
@@ -373,7 +378,11 @@ pub fn export_conformed_wav(
     }
 
     let channels = processed.channels as u16;
-    let n_frames = if processed.samples.is_empty() { 0 } else { processed.samples[0].len() };
+    let n_frames = if processed.samples.is_empty() {
+        0
+    } else {
+        processed.samples[0].len()
+    };
 
     let spec = WavSpec {
         channels,
@@ -414,9 +423,10 @@ pub fn export_conformed_wav(
         let _ = file.sync_all();
     }
     if let Some(parent) = dest_path.parent()
-        && let Ok(dir) = File::open(parent) {
-            let _ = dir.sync_all();
-        }
+        && let Ok(dir) = File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
 
     info!(
         "Successfully exported conformed 48kHz/24-bit WAV to {}",
@@ -454,7 +464,7 @@ mod tests {
         // 1. Mono test
         let mono_audio = DecodedAudio {
             channels: 1,
-            sample_rate: 44100, // Non-48k to test resampling
+            sample_rate: 44100,             // Non-48k to test resampling
             samples: vec![vec![0.3; 4410]], // 0.1s
         };
         let mono_dest = temp_dir.join("test_mono.wav");
@@ -467,7 +477,10 @@ mod tests {
 
         let reader = hound::WavReader::open(&mono_dest).unwrap();
         let spec = reader.spec();
-        assert_eq!(spec.channels, 1, "Mono input must produce 1-channel mono WAV");
+        assert_eq!(
+            spec.channels, 1,
+            "Mono input must produce 1-channel mono WAV"
+        );
         assert_eq!(spec.sample_rate, 48000, "Sample rate must be 48kHz");
         assert_eq!(spec.bits_per_sample, 24, "Bit depth must be 24-bit");
 
@@ -482,7 +495,10 @@ mod tests {
 
         let reader_st = hound::WavReader::open(&stereo_dest).unwrap();
         let spec_st = reader_st.spec();
-        assert_eq!(spec_st.channels, 2, "Stereo input must produce 2-channel stereo WAV");
+        assert_eq!(
+            spec_st.channels, 2,
+            "Stereo input must produce 2-channel stereo WAV"
+        );
         assert_eq!(spec_st.sample_rate, 48000);
         assert_eq!(spec_st.bits_per_sample, 24);
 
@@ -571,7 +587,12 @@ mod tests {
         assert_eq!(spec_out.bits_per_sample, 24, "Output must be 24-bit PCM");
 
         // 5. Verify SD detection sees the new kit
-        let sd_info = crate::sample_crate::sd_detector::build_sd_info(&mock_sd, &mock_sd.join("IMPORT"), None).unwrap();
+        let sd_info = crate::sample_crate::sd_detector::build_sd_info(
+            &mock_sd,
+            &mock_sd.join("IMPORT"),
+            None,
+        )
+        .unwrap();
         assert!(sd_info.existing_kits.contains(&"My_Kit".to_string()));
 
         let _ = fs::remove_dir_all(temp_dir);

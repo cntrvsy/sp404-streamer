@@ -3,14 +3,14 @@
 //! Feeds decoded 48kHz audio into the PipeWire monitor playback stream
 //! with zero-latency response and instant Spacebar cutoff.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use ringbuf::traits::*;
 use ringbuf::HeapProd;
+use ringbuf::traits::*;
 
 use crate::sample_crate::conformer::DecodedAudio;
 
@@ -80,7 +80,8 @@ impl PreviewPlayer {
                         let max_frames_to_write = free_slots / 2; // Stereo = 2 samples per frame
 
                         if max_frames_to_write > 0 {
-                            let frames_to_write = max_frames_to_write.min(total_frames - current_frame);
+                            let frames_to_write =
+                                max_frames_to_write.min(total_frames - current_frame);
 
                             for _ in 0..frames_to_write {
                                 let (sample_l, sample_r) = if audio.channels == 1 {
@@ -152,7 +153,9 @@ impl PreviewPlayer {
             audio_48k.samples[0].len()
         };
         let start_frame = ((start_ratio.clamp(0.0, 1.0) * total as f32) as usize).min(total);
-        let _ = self.cmd_tx.send(FeederCommand::Play(Arc::new(audio_48k), start_frame));
+        let _ = self
+            .cmd_tx
+            .send(FeederCommand::Play(Arc::new(audio_48k), start_frame));
     }
 
     /// Stops any currently playing sample preview immediately.
