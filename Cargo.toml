@@ -1,6 +1,6 @@
 [package]
 name = "sp404-streamer"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 description = "Lightweight stereo audio bridge for streaming Roland SP-404MKII on Linux"
 license = "MIT"
@@ -11,13 +11,32 @@ repository = "https://github.com/cntrvsy/sp404-streamer"
 
 [dependencies]
 eframe = "0.37.0"
+egui_extras = "0.37.0"
 libspa = "0.10.1"
 libspa-sys = "0.10.1"
 parking_lot = "0.13.0"
 pipewire = { version = "0.10.1", features = ["v0_3_50"] }
+hound = "3.5"
+libc = "0.2"
+rfd = "0.15"
 ringbuf = "0.5.3"
+rubato = "0.16"
+symphonia = { version = "0.5", features = ["all"] }
+thiserror = "2.0"
+strum = { version = "0.28", features = ["derive"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg()'] }
+
+[lints.clippy]
+needless_pass_by_value = "warn"
+clone_on_ref_ptr = "warn"
+manual_let_else = "warn"
+uninlined_format_args = "warn"
+match_same_arms = "warn"
+redundant_clone = "warn"
 
 [profile.release]
 opt-level = 3

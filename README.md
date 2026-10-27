@@ -30,20 +30,31 @@ I just got the sp-404 mk2, love it, yes i have a windows laptop but my main rig 
 
 To keep this tool focused, reliable, and fast, it is deliberately simple:
 
-- **It is NOT a DAW or audio recorder:** It does not record tracks, export stems, or trim samples. If you want to record your live session, use a dedicated tool like Reaper, Audacity, or Ardour.
-- **It is NOT a sample manager or project editor:** It doesn't back up SD cards, assign samples to pads, or edit project files (for that, check out the official Roland software or community librarians).
-- **It is NOT a general audio patchbay:** It won't route your guitars, synths, and webcams simultaneously, and it doesn't host audio plugins/VSTs. If you need complex multi-device routing, tools like `qpwgraph` or `Carla` are built for that.
-- **It is NOT a permanent background daemon:** It runs as a normal desktop app when you want to stream. When you close the window, it cleanly detaches and leaves your audio setup exactly as it found it.
+- **It is NOT a DAW or full project editor:** It does not host VSTs, record multi-track stems, or hack into binary `PROJECT_*.BIN` files.
+- **It is NOT a bloated tagging database:** It does not index your hard drive, demand AI tags, or clutter your filesystem with metadata sidecars.
+- **It is NOT a general audio patchbay:** It won't route your guitars, synths, and webcams simultaneously. If you need complex studio matrix routing, tools like `qpwgraph` or `Carla` are built for that.
+- **It is NOT a permanent background daemon:** It runs as a normal desktop app. When you close the window, it cleanly detaches and leaves your audio setup exactly as it found it.
 
 ---
 
 ## Features
 
-- **Stereo VU Meters:** Roland-styled dual meters with peak hold and clip indicators so you know your signal isn't redlining into Discord.
+### 📻 Stream / Live Monitor Deck
+- **Stereo VU Meters:** Roland-styled dual 32-segment LED meters with peak hold, decibel scale, and latching clip indicators.
 - **Audio Output Selector:** Choose whether you want to hear the sound through your headphones, monitor speakers, USB DAC, or system default.
-- **Local Monitor Mute:** If you have your headphones plugged directly into the front headphone jack of the SP-404, click **Mute Local PC Monitor**. This stops the PC from playing the sound back into your ears (preventing delay/echo) while Discord continues to receive the live audio stream.
-- **Low Latency:** Uses native PipeWire buffers (~5.3ms) with automatic jitter buffering so your finger drumming feels responsive and sounds clean without clicks or dropouts.
-- **Hotplug-Friendly:** You can plug or unplug your SP-404 while the app is open—it connects automatically when the device is detected.
+- **Local Monitor Volume & Mute:** Prominent gain fader with `↺ 100% (0 dB)` unity gain reset, digital readout chip, and one-click mute for latency-free monitoring directly from the SP-404's headphone jack.
+- **Low Latency:** Uses native PipeWire buffers (~5.3ms) with automatic jitter buffering.
+- **Hotplug-Friendly:** Automatically connects and reconnects when the SP-404 is plugged in or unplugged.
+
+### 📦 Sample Crate (Ingestion & SD Sync)
+- **Multi-File & Folder Ingestion:** Fast native multi-file dialogs and recursive folder scanning with automatic kit naming.
+- **Spacebar Auditioning:** Zero-latency preview routed straight through the existing PipeWire monitor stream with immediate cutoff.
+- **Interactive Waveform Scrubbing:** 128-bin transient overview showing duration, peak dBFS, live playhead tracking, and click/drag scrubbing.
+- **Live Search & Pad Reordering:** Filter samples instantly with live match counters and arrange kit sequence (`01–16`) with manual `▲`/`▼` controls or `Ctrl+Up`/`Ctrl+Down` keyboard shortcuts.
+- **Hardware-Conscious Conformer:** Auto-resamples to 48,000 Hz 24-bit linear PCM WAV. Mono files stay 1-channel mono (saving 50% of the hardware's 32-voice polyphony), and stereo stays stereo.
+- **Peak Normalization:** Optional true-peak normalization (default `-0.5 dBFS`).
+- **Hardware OLED Friendly:** Preserves original filenames while sanitizing FAT32 illegal characters and truncating to 14–16 characters to prevent unreadable scrolling on the SP OLED screen.
+- **SD Card Hotplug & Auto-Mount:** Automatically discovers connected SD block devices, auto-mounts SP-404 cards via udisks2 without root permissions, checks write-lock/read-only switches, guards against disk overflows, flushes kernel write buffers (`sync_all()`), and provides a 1-click **Safe Eject** button.
 
 ---
 

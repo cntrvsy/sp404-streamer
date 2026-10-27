@@ -1,6 +1,8 @@
+use strum::{Display, IntoStaticStr};
+
 /// Commands dispatched asynchronously from the GUI or device monitor
 /// to the single background audio command worker thread.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Display, IntoStaticStr)]
 pub enum AudioCommand {
     /// Route playback stream to a specific sink node name (None = OS default)
     RoutePlayback { sink_name: Option<String> },

@@ -18,12 +18,13 @@ use pipewire as pw;
 use pw::properties::properties;
 use pw::spa::pod::Pod;
 use pw::types::ObjectType;
-use ringbuf::HeapRb;
+use ringbuf::{HeapCons, HeapRb};
 use ringbuf::traits::*;
 use tracing::{debug, error, info, warn};
 
 use super::command::AudioCommand;
 use super::port_manager::PortManager;
+use super::preview_player::PreviewPlayer;
 use super::state::SharedAudioState;
 
 pub const DEFAULT_SAMPLE_RATE: u32 = 48000;
@@ -40,8 +41,13 @@ pub struct PipewireClient {
 }
 
 impl PipewireClient {
-    pub fn start(state: Arc<SharedAudioState>) -> (Self, mpsc::Sender<AudioCommand>) {
+    pub fn start(state: Arc<SharedAudioState>) -> (Self, mpsc::Sender<AudioCommand>, PreviewPlayer) {
         let (command_tx, command_rx) = mpsc::channel::<AudioCommand>();
+
+        // Preview ring buffer for Crate sample auditioning
+        let preview_rb = HeapRb::<f32>::new(BUFFER_CAPACITY);
+        let (preview_prod, preview_cons) = preview_rb.split();
+        let preview_player = PreviewPlayer::new(preview_prod);
 
         // 1. Dedicated Command Worker Thread (processes UI/registry commands in FIFO order)
         let state_for_worker = Arc::clone(&state);
@@ -96,7 +102,7 @@ impl PipewireClient {
         let thread_handle = thread::Builder::new()
             .name("sp404-pipewire".into())
             .spawn(move || {
-                if let Err(e) = Self::run_loop(state_clone, cmd_tx_for_pw) {
+                if let Err(e) = Self::run_loop(&state_clone, cmd_tx_for_pw, preview_cons) {
                     error!("PipeWire event loop exited with error: {:?}", e);
                 }
             })
@@ -109,12 +115,14 @@ impl PipewireClient {
                 worker_handle: Some(worker_handle),
             },
             command_tx,
+            preview_player,
         )
     }
 
     fn run_loop(
-        state: Arc<SharedAudioState>,
+        state: &Arc<SharedAudioState>,
         command_tx: mpsc::Sender<AudioCommand>,
+        mut preview_consumer: HeapCons<f32>,
     ) -> Result<(), pw::Error> {
         pw::init();
 
@@ -145,7 +153,7 @@ impl PipewireClient {
         let playback_stream = pw::stream::StreamBox::new(&core, "sp404-playback", playback_props)?;
 
         let mut is_primed = false;
-        let state_for_playback = Arc::clone(&state);
+        let state_for_playback = Arc::clone(state);
         let _playback_listener = playback_stream
             .add_local_listener::<()>()
             .process(move |stream, _| {
@@ -190,25 +198,42 @@ impl PipewireClient {
 
                     if is_primed {
                         for i in 0..n_frames {
-                            let sample_l = consumer.try_pop().unwrap_or_else(|| {
+                            let stream_l = consumer.try_pop().unwrap_or_else(|| {
                                 is_primed = false;
                                 0.0
-                            }) * gain;
-                            let sample_r = consumer.try_pop().unwrap_or_else(|| {
+                            });
+                            let stream_r = consumer.try_pop().unwrap_or_else(|| {
                                 is_primed = false;
                                 0.0
-                            }) * gain;
+                            });
+
+                            let prev_l = preview_consumer.try_pop().unwrap_or(0.0);
+                            let prev_r = preview_consumer.try_pop().unwrap_or(0.0);
+
+                            let final_l = ((stream_l + prev_l) * gain).clamp(-1.0, 1.0);
+                            let final_r = ((stream_r + prev_r) * gain).clamp(-1.0, 1.0);
 
                             let start_l = i * stride;
                             let start_r = start_l + mem::size_of::<f32>();
 
-                            slice[start_l..start_l + 4].copy_from_slice(&sample_l.to_le_bytes());
-                            slice[start_r..start_r + 4].copy_from_slice(&sample_r.to_le_bytes());
+                            slice[start_l..start_l + 4].copy_from_slice(&final_l.to_le_bytes());
+                            slice[start_r..start_r + 4].copy_from_slice(&final_r.to_le_bytes());
                         }
                     } else {
-                        // Output silence while priming
-                        let out_bytes = n_frames * stride;
-                        slice[..out_bytes].fill(0);
+                        // When stream is not primed, output preview samples if active, else silence
+                        for i in 0..n_frames {
+                            let prev_l = preview_consumer.try_pop().unwrap_or(0.0);
+                            let prev_r = preview_consumer.try_pop().unwrap_or(0.0);
+
+                            let final_l = (prev_l * gain).clamp(-1.0, 1.0);
+                            let final_r = (prev_r * gain).clamp(-1.0, 1.0);
+
+                            let start_l = i * stride;
+                            let start_r = start_l + mem::size_of::<f32>();
+
+                            slice[start_l..start_l + 4].copy_from_slice(&final_l.to_le_bytes());
+                            slice[start_r..start_r + 4].copy_from_slice(&final_r.to_le_bytes());
+                        }
                     }
 
                     let chunk = data.chunk_mut();
@@ -235,15 +260,9 @@ impl PipewireClient {
             properties: playback_audio_info.into(),
         };
 
-        let playback_values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
-            Cursor::new(Vec::new()),
-            &pw::spa::pod::Value::Object(playback_pod_obj),
-        )
-        .unwrap()
-        .0
-        .into_inner();
-
-        let mut playback_params = [Pod::from_bytes(&playback_values).unwrap()];
+        let playback_values = serialize_spa_pod(playback_pod_obj)?;
+        let playback_pod = Pod::from_bytes(&playback_values).ok_or(pw::Error::CreationFailed)?;
+        let mut playback_params = [playback_pod];
 
         playback_stream.connect(
             pw::spa::utils::Direction::Output,
@@ -259,11 +278,11 @@ impl PipewireClient {
         // 2. Set up Device Registry Watcher
         let active_target_id = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
-        let state_for_add = Arc::clone(&state);
+        let state_for_add = Arc::clone(state);
         let target_id_for_add = Arc::clone(&active_target_id);
         let cmd_tx_for_add = command_tx.clone();
 
-        let state_for_remove = Arc::clone(&state);
+        let state_for_remove = Arc::clone(state);
         let target_id_for_remove = Arc::clone(&active_target_id);
         let cmd_tx_for_remove = command_tx;
 
@@ -332,7 +351,7 @@ impl PipewireClient {
 
         let capture_stream = pw::stream::StreamBox::new(&core, "sp404-capture", capture_props)?;
 
-        let state_for_capture = Arc::clone(&state);
+        let state_for_capture = Arc::clone(state);
         let _capture_listener = capture_stream
             .add_local_listener::<()>()
             .process(move |stream, _| {
@@ -405,15 +424,9 @@ impl PipewireClient {
             properties: capture_audio_info.into(),
         };
 
-        let capture_values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
-            Cursor::new(Vec::new()),
-            &pw::spa::pod::Value::Object(capture_pod_obj),
-        )
-        .unwrap()
-        .0
-        .into_inner();
-
-        let mut capture_params = [Pod::from_bytes(&capture_values).unwrap()];
+        let capture_values = serialize_spa_pod(capture_pod_obj)?;
+        let capture_pod = Pod::from_bytes(&capture_values).ok_or(pw::Error::CreationFailed)?;
+        let mut capture_params = [capture_pod];
 
         capture_stream.connect(
             pw::spa::utils::Direction::Input,
@@ -429,4 +442,14 @@ impl PipewireClient {
 
         Ok(())
     }
+}
+
+/// Helper function to safely serialize an SPA POD object without panicking.
+fn serialize_spa_pod(pod_obj: pw::spa::pod::Object) -> Result<Vec<u8>, pw::Error> {
+    pw::spa::pod::serialize::PodSerializer::serialize(
+        Cursor::new(Vec::new()),
+        &pw::spa::pod::Value::Object(pod_obj),
+    )
+    .map(|(cursor, _)| cursor.into_inner())
+    .map_err(|_| pw::Error::CreationFailed)
 }

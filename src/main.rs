@@ -5,6 +5,7 @@
 //! via application window screen sharing.
 
 pub mod audio;
+pub mod sample_crate;
 pub mod ui;
 
 use eframe::egui;
@@ -29,18 +30,18 @@ fn main() -> eframe::Result<()> {
     let audio_state = SharedAudioState::new();
 
     // 2. Start PipeWire audio engine and command worker in background threads
-    let (_pipewire_client, command_tx) = PipewireClient::start(Arc::clone(&audio_state));
+    let (_pipewire_client, command_tx, preview_player) = PipewireClient::start(Arc::clone(&audio_state));
 
     // 3. Configure compact Wayland-friendly viewport
     let icon_data =
         eframe::icon_data::from_png_bytes(include_bytes!("../assets/sp404-streamer.png")).ok();
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([370.0, 255.0])
-        .with_min_inner_size([330.0, 220.0])
+        .with_inner_size([480.0, 545.0])
+        .with_min_inner_size([380.0, 360.0])
         .with_resizable(true)
         .with_app_id("sp404-streamer")
-        .with_title("SP-404MKII Streamer");
+        .with_title("SP-404MKII Streamer & Crate");
 
     if let Some(icon) = icon_data {
         viewport = viewport.with_icon(icon);
@@ -58,7 +59,7 @@ fn main() -> eframe::Result<()> {
         native_options,
         Box::new(move |cc| {
             RolandTheme::apply(&cc.egui_ctx);
-            Ok(Box::new(Sp404StreamerApp::new(state_for_ui, command_tx)))
+            Ok(Box::new(Sp404StreamerApp::new(state_for_ui, command_tx, preview_player)))
         }),
     )
 }

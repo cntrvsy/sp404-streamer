@@ -17,6 +17,13 @@ pub struct AudioSinkDevice {
     pub description: String,
 }
 
+/// Describes a matched stereo pair of Left and Right audio ports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StereoPorts {
+    pub left: String,
+    pub right: String,
+}
+
 /// Port and link management for PipeWire audio routing.
 pub struct PortManager;
 
@@ -100,21 +107,15 @@ impl PortManager {
 
     /// Pure parser: Extracts the default audio sink node name from `pw-metadata` stdout.
     pub fn parse_default_sink_from_pw_metadata(stdout: &str) -> Option<String> {
-        for line in stdout.lines() {
-            if !line.contains("default.audio.sink") {
-                continue;
-            }
-            if let Some(start) = line.find("{\"name\":\"") {
-                let rest = &line[start + 9..];
-                if let Some(end) = rest.find('"') {
-                    let name = rest[..end].trim();
-                    if !name.is_empty() {
-                        return Some(name.to_string());
-                    }
-                }
-            }
-        }
-        None
+        stdout
+            .lines()
+            .filter(|line| line.contains("default.audio.sink"))
+            .find_map(|line| {
+                let (_, rest) = line.split_once("{\"name\":\"")?;
+                let (name, _) = rest.split_once('"')?;
+                let trimmed = name.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
     }
 
     /// Query the current OS default audio sink name using native PipeWire metadata (`pw-metadata`).
@@ -133,8 +134,8 @@ impl PortManager {
     pub fn extract_sink_playback_ports(
         stdout: &str,
         sink_name: &str,
-    ) -> (Option<String>, Option<String>) {
-        let prefix = format!("{}:", sink_name);
+    ) -> Option<StereoPorts> {
+        let prefix = format!("{sink_name}:");
         let mut sink_fl = None;
         let mut sink_fr = None;
 
@@ -163,7 +164,10 @@ impl PortManager {
             }
         }
 
-        (sink_fl, sink_fr)
+        match (sink_fl, sink_fr) {
+            (Some(left), Some(right)) => Some(StereoPorts { left, right }),
+            _ => None,
+        }
     }
 
     /// Routes playback stream to a specific sink, or to the system default sink if None.
@@ -198,17 +202,15 @@ impl PortManager {
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let (sink_fl, sink_fr) = Self::extract_sink_playback_ports(&stdout, &sink_name);
+        if let Some(ports) = Self::extract_sink_playback_ports(&stdout, &sink_name) {
+            let fl_src = format!("{stream_node_name}:output_FL");
+            let fr_src = format!("{stream_node_name}:output_FR");
 
-        if let (Some(fl_dst), Some(fr_dst)) = (sink_fl, sink_fr) {
-            let fl_src = format!("{}:output_FL", stream_node_name);
-            let fr_src = format!("{}:output_FR", stream_node_name);
+            info!("Linking Playback: {} -> {}", fl_src, ports.left);
+            let _ = Command::new("pw-link").args([&fl_src, &ports.left]).output();
 
-            info!("Linking Playback: {} -> {}", fl_src, fl_dst);
-            let _ = Command::new("pw-link").args([&fl_src, &fl_dst]).output();
-
-            info!("Linking Playback: {} -> {}", fr_src, fr_dst);
-            let _ = Command::new("pw-link").args([&fr_src, &fr_dst]).output();
+            info!("Linking Playback: {} -> {}", fr_src, ports.right);
+            let _ = Command::new("pw-link").args([&fr_src, &ports.right]).output();
         } else {
             warn!("Could not identify playback ports for sink: {}", sink_name);
         }
@@ -224,8 +226,8 @@ impl PortManager {
     pub fn extract_sp404_ports(
         stdout: &str,
         sp404_node_name: &str,
-    ) -> (Option<String>, Option<String>) {
-        let prefix = format!("{}:", sp404_node_name);
+    ) -> Option<StereoPorts> {
+        let prefix = format!("{sp404_node_name}:");
         let mut sp_fl = None;
         let mut sp_fr = None;
         let mut candidate_ports = Vec::new();
@@ -256,7 +258,10 @@ impl PortManager {
             sp_fr = Some(candidate_ports[1].clone());
         }
 
-        (sp_fl, sp_fr)
+        match (sp_fl, sp_fr) {
+            (Some(left), Some(right)) => Some(StereoPorts { left, right }),
+            _ => None,
+        }
     }
 
     /// Attempts to discover and link SP-404MKII hardware capture ports to the capture stream.
@@ -275,30 +280,26 @@ impl PortManager {
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let (sp_fl, sp_fr) = Self::extract_sp404_ports(&stdout, sp404_node_name);
-
-        let in_fl = format!("{}:input_FL", capture_stream_name);
-        let in_fr = format!("{}:input_FR", capture_stream_name);
-
-        let linked_l = if let Some(src_fl) = sp_fl {
-            info!("Linking SP-404 L: {} -> {}", src_fl, in_fl);
-            Command::new("pw-link")
-                .args([&src_fl, &in_fl])
-                .status()
-                .is_ok()
-        } else {
-            false
+        let Some(ports) = Self::extract_sp404_ports(&stdout, sp404_node_name) else {
+            return false;
         };
 
-        let linked_r = if let Some(src_fr) = sp_fr {
-            info!("Linking SP-404 R: {} -> {}", src_fr, in_fr);
-            Command::new("pw-link")
-                .args([&src_fr, &in_fr])
-                .status()
-                .is_ok()
-        } else {
-            false
-        };
+        let in_fl = format!("{capture_stream_name}:input_FL");
+        let in_fr = format!("{capture_stream_name}:input_FR");
+
+        info!("Linking SP-404 L: {} -> {}", ports.left, in_fl);
+        let linked_l = Command::new("pw-link")
+            .args([&ports.left, &in_fl])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        info!("Linking SP-404 R: {} -> {}", ports.right, in_fr);
+        let linked_r = Command::new("pw-link")
+            .args([&ports.right, &in_fr])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
 
         linked_l && linked_r
     }
@@ -501,17 +502,16 @@ alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FR
 alsa_input.usb-Blue_Yeti_00-00.analog-stereo:capture_FL
 "#;
 
-        let (fl, fr) = PortManager::extract_sp404_ports(
+        let ports = PortManager::extract_sp404_ports(
             sample_pw_link_o,
             "alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo",
         );
         assert_eq!(
-            fl,
-            Some("alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FL".to_string())
-        );
-        assert_eq!(
-            fr,
-            Some("alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FR".to_string())
+            ports,
+            Some(StereoPorts {
+                left: "alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FL".to_string(),
+                right: "alsa_input.usb-Roland_SP-404MKII_000-00.analog-stereo:capture_FR".to_string(),
+            })
         );
     }
 
@@ -522,9 +522,14 @@ alsa_input.usb-Roland_SP404:port_1
 alsa_input.usb-Roland_SP404:port_2
 "#;
 
-        let (fl, fr) =
+        let ports =
             PortManager::extract_sp404_ports(sample_pw_link_o, "alsa_input.usb-Roland_SP404");
-        assert_eq!(fl, Some("alsa_input.usb-Roland_SP404:port_1".to_string()));
-        assert_eq!(fr, Some("alsa_input.usb-Roland_SP404:port_2".to_string()));
+        assert_eq!(
+            ports,
+            Some(StereoPorts {
+                left: "alsa_input.usb-Roland_SP404:port_1".to_string(),
+                right: "alsa_input.usb-Roland_SP404:port_2".to_string(),
+            })
+        );
     }
 }
