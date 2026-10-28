@@ -31,8 +31,8 @@ On Linux, Discord and Vesktop capture audio exclusively from application windows
 - **Instant Auditioning:** Spacebar-triggered playback routed straight through the PipeWire monitor engine with immediate stop cutoff.
 - **Waveform Overview:** 128-bin transient display with duration, peak dBFS metrics, live playhead tracking, and interactive click/drag scrubbing.
 - **Kit Arrangement:** Live search filtering and pad ordering (`01–16`) with manual controls or keyboard shortcuts.
-- **Hardware Conforming Engine:** Resamples audio to 48,000 Hz 24-bit linear PCM WAV. Preserves mono files as single-channel mono to conserve SP-404MKII polyphony.
-- **Display Sanitization:** Strips illegal FAT32 characters and limits filenames to 16 characters for clean rendering on the SP-404MKII OLED display.
+- **Hardware Conforming Engine:** Resamples audio to 48,000 Hz 24-bit linear PCM WAV, matching the SP-404MKII's native sample rate. Preserves mono files as single-channel mono to conserve SP-404MKII polyphony (1 voice instead of 2).
+- **Display & FAT32 Sanitization:** Strips illegal FAT32 characters and formats filenames (default: 16 characters) for clean, readable rendering on the SP-404MKII OLED display.
 - **SD Hotplug & Safe Ejection:** Discovers SD cards via `udisks2`, checks hardware write-lock switches, verifies available disk capacity, executes kernel cache flushes (`sync_all()`), and unmounts safely with one click.
 
 ---
@@ -74,12 +74,12 @@ Decoded natively using pure-Rust decoders (Symphonia) without external library d
 
 ## SP-404MKII Conforming Specifications
 
-Exported samples are conformed to Roland hardware standards:
-- **48,000 Hz / 24-Bit Linear PCM:** The native internal sample rate of the SP-404MKII DSP, bypassing hardware conversion latency during import.
-- **Polyphony Preservation:** True mono sources remain single-channel mono files, saving 50% hardware voice allocation (1 voice instead of 2 voices for stereo against the 32-voice limit).
-- **OLED Display Sanitization:** Strips FAT32 illegal characters (`/ \ : * ? " < > |`) and truncates names to 16 characters to prevent sluggish marquee scrolling on the SP-404 display.
-- **Pad Auto-Numbering:** Prefixes filenames with `01_` through `16_` for automatic pad assignment when importing kits via the SP-404 utility menu.
-- **Peak Normalization:** Optional true-peak normalization (default: `-0.5 dBFS`).
+Exported samples are conformed to Roland SP-404MKII hardware and workflow conventions:
+- **48,000 Hz Linear PCM:** Matches the SP-404MKII's native internal sample rate, eliminating hardware resampling overhead during import.
+- **Polyphony Preservation:** Preserves mono sources as single-channel mono files, reducing voice consumption against the hardware's 32-voice limit (1 voice for mono vs. 2 voices for stereo).
+- **FAT32 Sanitization & OLED Sizing:** Strips FAT32-illegal characters and optionally shortens names for clean, readable display on the 128×64 OLED screen without long marquee scrolls.
+- **Kit Ordering (01_–16_):** Optional sequential numbering ensures predictable pad assignment (Pads 1–16) during batch import and in the official Roland SP-404MKII desktop app.
+- **Mastering Headroom:** Optional true-peak normalization to a user-defined ceiling (default: `-0.5 dBFS`) to ensure consistent kit volume and prevent inter-sample clipping.
 
 ---
 

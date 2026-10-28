@@ -48,7 +48,7 @@ pub struct ConformOptions {
     pub peak_ceiling_db: f32,
     /// Whether to prefix pad numbers (e.g. "01_", "02_") on export
     pub pad_numbered: bool,
-    /// Max character length for base name (default: 16 chars for SP-404 OLED)
+    /// Max character length for base name (default: 16 chars for clean OLED readability)
     pub max_name_len: usize,
 }
 

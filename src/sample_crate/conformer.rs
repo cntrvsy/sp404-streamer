@@ -1,10 +1,10 @@
 //! Audio conforming and conversion engine.
 //!
 //! Converts arbitrary audio files (MP3, FLAC, WAV, AAC, Opus, etc.) to
-//! SP-404MKII hardware-native 48kHz, 24-bit linear PCM WAV.
+//! SP-404MKII-compatible 48kHz, 24-bit linear PCM WAV.
 //!
 //! Preserves mono (1-channel) to save hardware polyphony, and stereo (2-channel).
-//! Applies optional peak normalization and sanitizes filenames for the 128x64 OLED display.
+//! Applies optional peak normalization and formats filenames for FAT32 and OLED display readability.
 
 use std::fs::{self, File};
 use std::path::Path;
@@ -327,7 +327,7 @@ pub fn stage_audio_file(
     })
 }
 
-/// Sanitizes a filename for FAT32 and the SP-404MKII OLED 14-16 character limit.
+/// Sanitizes a filename for FAT32 compatibility and OLED display readability.
 pub fn sanitize_filename(path: &Path, max_len: usize) -> String {
     let stem = path
         .file_stem()

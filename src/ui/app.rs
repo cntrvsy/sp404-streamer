@@ -522,7 +522,7 @@ impl eframe::App for Sp404StreamerApp {
                         );
                     } else {
                         ui.label(
-                            RichText::new("SP-404MKII NATIVE:")
+                            RichText::new("CONFORM TARGET:")
                                 .size(9.0)
                                 .color(RolandTheme::ACCENT_AMBER)
                                 .monospace()
