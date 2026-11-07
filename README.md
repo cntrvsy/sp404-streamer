@@ -31,7 +31,7 @@ On Linux, Discord and Vesktop capture audio exclusively from application windows
 - **Instant Auditioning:** Spacebar-triggered playback routed straight through the PipeWire monitor engine with immediate stop cutoff.
 - **Waveform Overview:** 128-bin transient display with duration, peak dBFS metrics, live playhead tracking, and interactive click/drag scrubbing.
 - **Kit Arrangement:** Live search filtering and pad ordering (`01–16`) with manual controls or keyboard shortcuts.
-- **Hardware Conforming Engine:** Resamples audio to 48,000 Hz 24-bit linear PCM WAV, matching the SP-404MKII's native sample rate. Preserves mono files as single-channel mono to conserve SP-404MKII polyphony (1 voice instead of 2).
+- **Hardware Conforming Engine:** Resamples audio to 48,000 Hz 16-bit linear PCM WAV, matching the SP-404MKII's native SD card import specification (preventing "File Not Supported" hardware rejection). Preserves mono files as single-channel mono to conserve SP-404MKII polyphony (1 voice instead of 2).
 - **Display & FAT32 Sanitization:** Strips illegal FAT32 characters and formats filenames (default: 16 characters) for clean, readable rendering on the SP-404MKII OLED display.
 - **SD Hotplug & Safe Ejection:** Discovers SD cards via `udisks2`, checks hardware write-lock switches, verifies available disk capacity, executes kernel cache flushes (`sync_all()`), and unmounts safely with one click.
 

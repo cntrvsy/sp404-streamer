@@ -1,7 +1,7 @@
 //! Audio conforming and conversion engine.
 //!
 //! Converts arbitrary audio files (MP3, FLAC, WAV, AAC, Opus, etc.) to
-//! SP-404MKII-compatible 48kHz, 24-bit linear PCM WAV.
+//! SP-404MKII-compatible 48kHz, 16-bit linear PCM WAV (native hardware SD import).
 //!
 //! Preserves mono (1-channel) to save hardware polyphony, and stereo (2-channel).
 //! Applies optional peak normalization and formats filenames for FAT32 and OLED display readability.
@@ -358,7 +358,7 @@ pub fn sanitize_filename(path: &Path, max_len: usize) -> String {
     cleaned
 }
 
-/// Writes processed audio to a 24-bit linear PCM WAV file.
+/// Writes processed audio to a 16-bit linear PCM WAV file (required for native SP-404MKII SD card import).
 ///
 /// Ensures mono samples are written as 1-channel mono WAV (saving polyphony)
 /// and stereo samples as 2-channel WAV. Flushes to disk via `sync_all()`.
@@ -387,7 +387,7 @@ pub fn export_conformed_wav(
     let spec = WavSpec {
         channels,
         sample_rate: SP404_SAMPLE_RATE,
-        bits_per_sample: 24,
+        bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
 
@@ -401,14 +401,15 @@ pub fn export_conformed_wav(
     {
         let mut writer = WavWriter::create(&tmp_path, spec)?;
 
-        // 24-bit signed integer range: -8,388,608 to 8,388,607
-        const MAX_24BIT: f32 = 8_388_607.0;
+        // 16-bit signed integer range: -32,768 to 32,767
+        // SP-404MKII SD card import strictly requires 16-bit linear PCM (rejects 24-bit WAVs).
+        const MAX_16BIT: f32 = 32_767.0;
 
         for frame in 0..n_frames {
             for ch in 0..processed.channels {
                 let sample = processed.samples[ch][frame].clamp(-1.0, 1.0);
-                let val_24bit = (sample * MAX_24BIT).round() as i32;
-                writer.write_sample(val_24bit)?;
+                let val_16bit = (sample * MAX_16BIT).round().clamp(-32768.0, 32767.0) as i16;
+                writer.write_sample(val_16bit)?;
             }
         }
 
@@ -429,7 +430,7 @@ pub fn export_conformed_wav(
     }
 
     info!(
-        "Successfully exported conformed 48kHz/24-bit WAV to {}",
+        "Successfully exported conformed 48kHz/16-bit WAV to {}",
         dest_path.display()
     );
 
@@ -482,7 +483,7 @@ mod tests {
             "Mono input must produce 1-channel mono WAV"
         );
         assert_eq!(spec.sample_rate, 48000, "Sample rate must be 48kHz");
-        assert_eq!(spec.bits_per_sample, 24, "Bit depth must be 24-bit");
+        assert_eq!(spec.bits_per_sample, 16, "Bit depth must be 16-bit for SD card import");
 
         // 2. Stereo test
         let stereo_audio = DecodedAudio {
@@ -500,7 +501,7 @@ mod tests {
             "Stereo input must produce 2-channel stereo WAV"
         );
         assert_eq!(spec_st.sample_rate, 48000);
-        assert_eq!(spec_st.bits_per_sample, 24);
+        assert_eq!(spec_st.bits_per_sample, 16);
 
         let _ = fs::remove_dir_all(temp_dir);
     }
@@ -584,7 +585,7 @@ mod tests {
         let spec_out = reader.spec();
         assert_eq!(spec_out.channels, 1, "Mono input must stay mono");
         assert_eq!(spec_out.sample_rate, 48000, "Output must be 48kHz");
-        assert_eq!(spec_out.bits_per_sample, 24, "Output must be 24-bit PCM");
+        assert_eq!(spec_out.bits_per_sample, 16, "Output must be 16-bit PCM");
 
         // 5. Verify SD detection sees the new kit
         let sd_info = crate::sample_crate::sd_detector::build_sd_info(

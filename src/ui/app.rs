@@ -529,7 +529,7 @@ impl eframe::App for Sp404StreamerApp {
                                 .strong(),
                         );
                         ui.label(
-                            RichText::new("48kHz • 24-bit PCM")
+                            RichText::new("48kHz • 16-bit PCM (SD Native)")
                                 .size(9.0)
                                 .color(RolandTheme::TEXT_MUTED),
                         );
