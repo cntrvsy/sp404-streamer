@@ -164,6 +164,12 @@ windowrulev2 = size 480 545, class:^(sp404-streamer)$
 
 ---
 
+## Roadmap & Hardware Capabilities
+
+For an in-depth breakdown of potential features and officially documented SP-404MKII hardware capabilities (custom 128×64 OLED animations, transient auto-slicing, USB MIDI integration, stem recording, and SD card archiving), see the [SP-404MKII Integration Roadmap](ROADMAP.md).
+
+---
+
 ## License
 
 Distributed under the [MIT License](LICENSE).
