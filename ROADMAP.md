@@ -175,3 +175,4 @@ The SP-404MKII operates as a **24-bit / 48,000 Hz** multi-channel USB Audio inte
    [https://www.roland.com/global/support/by_product/sp-404mk2/owners_manuals/](https://www.roland.com/global/support/by_product/sp-404mk2/owners_manuals/)
 3. **Roland SP-404MKII Version 2.0 / 3.0 / 4.0 Supplementary Manuals (Custom BMP Specifications):**
    [https://www.roland.com/global/support/by_product/sp-404mk2/updates_drivers/](https://www.roland.com/global/support/by_product/sp-404mk2/updates_drivers/)
+
