@@ -184,18 +184,19 @@ pub fn show_screen_studio_ui(
         }
     }
 
-    // Dynamic bottom deck budget for Ingest + Dither + Project Sync + Guide
-    let mut bottom_deck_h = 176.0;
+    // Dynamic bottom deck budget:
+    // Base height: 20px header + 22px ingest + 22px dither + 22px thresh + 22px project + 24px action + paddings = 162px
+    let mut bottom_deck_h = 162.0;
     if state.show_hardware_guide {
-        bottom_deck_h += 52.0;
+        bottom_deck_h += 48.0;
     }
     if state.status_message.is_some() {
-        bottom_deck_h += 20.0;
+        bottom_deck_h += 18.0;
     }
 
     // Universal 2-Deck Model: Upper OLED Stage (Hero) + Lower Ingest/Dither/Sync Deck
     StripBuilder::new(ui)
-        .size(Size::remainder().at_least(180.0))
+        .size(Size::remainder().at_least(140.0))
         .size(Size::exact(RolandTheme::CARD_GAP))
         .size(Size::exact(bottom_deck_h))
         .vertical(|mut strip| {
@@ -223,8 +224,8 @@ pub fn show_screen_studio_ui(
                         );
                     });
 
-                    // 1. Hero OLED Bezel: Reserving 30px for Transport Scrubber below it
-                    let bezel_avail_h = (ui.available_height() - 32.0).max(96.0);
+                    // 1. Hero OLED Bezel: Reserving 28px for Transport Scrubber below it
+                    let bezel_avail_h = (ui.available_height() - 28.0).max(72.0);
                     ui.allocate_ui(Vec2::new(ui.available_width(), bezel_avail_h), |ui| {
                         if let Some(frame) = state.mono_frames.get(state.current_frame) {
                             let resp = OledDisplayWidget::new(
@@ -240,20 +241,23 @@ pub fn show_screen_studio_ui(
                         }
                     });
 
-                    ui.add_space(4.0);
+                    ui.add_space(2.0);
 
                     // 2. Docked Transport Bar: Full-Width Frame Scrubber & Playhead Controls
                     ui.horizontal(|ui| {
                         let play_label = if state.is_playing {
-                            "⏸ Pause"
+                            "Pause"
                         } else {
-                            "▶ Play"
+                            "Play"
                         };
+                        let play_btn = egui::Button::new(
+                            RichText::new(play_label)
+                                .size(9.5)
+                                .color(RolandTheme::TEXT_PRIMARY)
+                                .strong(),
+                        );
                         if ui
-                            .add_sized(
-                                Vec2::new(68.0, 20.0),
-                                egui::Button::new(RichText::new(play_label).size(10.0).strong()),
-                            )
+                            .add_sized(Vec2::new(54.0, 18.0), play_btn)
                             .clicked()
                         {
                             state.is_playing = !state.is_playing;
@@ -261,7 +265,7 @@ pub fn show_screen_studio_ui(
 
                         let max_idx = state.mono_frames.len().saturating_sub(1);
                         let mut frame_num = state.current_frame + 1;
-                        ui.spacing_mut().slider_width = (ui.available_width() - 95.0).max(80.0);
+                        ui.spacing_mut().slider_width = (ui.available_width() - 85.0).max(70.0);
                         if ui
                             .add(
                                 Slider::new(&mut frame_num, 1..=(max_idx + 1).max(1))
@@ -289,7 +293,7 @@ pub fn show_screen_studio_ui(
                     ui.set_width(ui.available_width());
                     RolandTheme::section_header(ui, "INGESTION, DITHER & PROJECT SYNC", |ui| {
                         if ui
-                            .small_button("↺ Reset Dither")
+                            .small_button("Reset")
                             .on_hover_text("Reset dithering and contrast controls to defaults")
                             .clicked()
                         {
@@ -306,12 +310,12 @@ pub fn show_screen_studio_ui(
                         .horizontal(|mut row| {
                             row.cell(|ui| {
                                 let btn = egui::Button::new(
-                                    RichText::new("📂 Load GIF/Image")
+                                    RichText::new("Load Image")
                                         .size(9.5)
                                         .color(RolandTheme::ACCENT_ORANGE)
                                         .strong(),
                                 )
-                                .min_size(Vec2::new(ui.available_width(), 20.0));
+                                .min_size(Vec2::new(ui.available_width(), 19.0));
 
                                 if ui
                                     .add(btn)
@@ -332,9 +336,9 @@ pub fn show_screen_studio_ui(
 
                             row.cell(|ui| {
                                 let btn = egui::Button::new(
-                                    RichText::new("📋 Paste").size(9.5),
+                                    RichText::new("Paste").size(9.5).color(RolandTheme::TEXT_PRIMARY),
                                 )
-                                .min_size(Vec2::new(ui.available_width(), 20.0));
+                                .min_size(Vec2::new(ui.available_width(), 19.0));
 
                                 if ui
                                     .add(btn)
@@ -351,7 +355,7 @@ pub fn show_screen_studio_ui(
                                 let mut chosen_preset = state.active_preset;
                                 egui::ComboBox::from_id_salt("oled_demo_preset")
                                     .selected_text(
-                                        RichText::new(format!("Preset: {chosen_preset}"))
+                                        RichText::new(format!("{chosen_preset}"))
                                             .size(9.5),
                                     )
                                     .width(ui.available_width())
@@ -370,18 +374,18 @@ pub fn show_screen_studio_ui(
                             });
                         });
 
-                    ui.add_space(4.0);
+                    ui.add_space(3.0);
 
                     // Row 2: 2-Column Form Grid (Dither Mode, Threshold/Contrast, SD Project)
                     RolandTheme::form_grid(ui, "oled_dither_sync_grid", |ui| {
                         // Row A: Dither Mode + Invert
                         RolandTheme::grid_label(ui, "DITHER MODE");
                         ui.horizontal(|ui| {
-                            let combo_w = (ui.available_width() - 95.0).max(130.0);
+                            let combo_w = (ui.available_width() - 95.0).max(120.0);
                             egui::ComboBox::from_id_salt("oled_dither_mode")
                                 .selected_text(
                                     RichText::new(state.adjustments.dither_mode.to_string())
-                                        .size(10.0),
+                                        .size(9.5),
                                 )
                                 .width(combo_w)
                                 .show_ui(ui, |ui| {
@@ -402,7 +406,7 @@ pub fn show_screen_studio_ui(
                             if ui
                                 .checkbox(
                                     &mut state.adjustments.invert,
-                                    RichText::new("Invert B/W").size(9.5),
+                                    RichText::new("Invert B/W").size(9.0),
                                 )
                                 .changed()
                             {
@@ -419,7 +423,7 @@ pub fn show_screen_studio_ui(
                             .horizontal(|mut s| {
                                 s.cell(|ui| {
                                     ui.spacing_mut().slider_width =
-                                        (ui.available_width() - 48.0).max(50.0);
+                                        (ui.available_width() - 48.0).max(45.0);
                                     if ui
                                         .add(
                                             Slider::new(&mut state.adjustments.threshold, 8..=248)
@@ -434,7 +438,7 @@ pub fn show_screen_studio_ui(
                                 });
                                 s.cell(|ui| {
                                     ui.spacing_mut().slider_width =
-                                        (ui.available_width() - 52.0).max(50.0);
+                                        (ui.available_width() - 52.0).max(45.0);
                                     if ui
                                         .add(
                                             Slider::new(
@@ -460,10 +464,10 @@ pub fn show_screen_studio_ui(
                             egui::ComboBox::from_id_salt("oled_project_slot")
                                 .selected_text(
                                     RichText::new(&state.target_project_name)
-                                        .size(10.0)
+                                        .size(9.5)
                                         .monospace(),
                                 )
-                                .width(105.0)
+                                .width(95.0)
                                 .show_ui(ui, |ui| {
                                     for i in 1..=16 {
                                         let slot = format!("PROJECT_{i:02}");
@@ -475,10 +479,10 @@ pub fn show_screen_studio_ui(
                                     }
                                 });
 
-                            let target_w = ui.available_width().max(120.0);
+                            let target_w = ui.available_width().max(110.0);
                             egui::ComboBox::from_id_salt("oled_export_target")
                                 .selected_text(
-                                    RichText::new(state.export_target.to_string()).size(10.0),
+                                    RichText::new(state.export_target.to_string()).size(9.5),
                                 )
                                 .width(target_w)
                                 .show_ui(ui, |ui| {
@@ -498,19 +502,20 @@ pub fn show_screen_studio_ui(
                         state.redither_all();
                     }
 
-                    ui.add_space(4.0);
+                    ui.add_space(3.0);
 
-                    // Row 3: Primary Symmetrical Action Bar
+                    // Row 3: Primary Action Bar (Clean text, Roland color scheme, no emojis)
                     let sd_ready = detected_sd.is_some_and(|sd| !sd.is_read_only);
                     StripBuilder::new(ui)
                         .size(Size::relative(0.48))
-                        .size(Size::relative(0.30))
+                        .size(Size::relative(0.32))
                         .size(Size::remainder())
                         .horizontal(|mut bar| {
                             bar.cell(|ui| {
                                 let sync_btn = egui::Button::new(
-                                    RichText::new("⚡ SYNC TO SD PROJECT")
-                                        .size(10.0)
+                                    RichText::new("SYNC TO SD PROJECT")
+                                        .size(9.5)
+                                        .monospace()
                                         .color(if sd_ready {
                                             RolandTheme::TEXT_ON_ACCENT
                                         } else {
@@ -523,7 +528,7 @@ pub fn show_screen_studio_ui(
                                 } else {
                                     Color32::from_rgb(24, 26, 34)
                                 })
-                                .min_size(Vec2::new(ui.available_width(), 24.0));
+                                .min_size(Vec2::new(ui.available_width(), 22.0));
 
                                 if ui
                                     .add_enabled(sd_ready, sync_btn)
@@ -543,7 +548,7 @@ pub fn show_screen_studio_ui(
                                         Ok(files) => {
                                             state.status_message = Some((
                                                 format!(
-                                                    "✓ Synced {} BMPs to {}/PICTURE/! Re-import project on SP-404.",
+                                                    "Synced {} BMPs to {}/PICTURE/ (Re-import project on SP-404)",
                                                     files.len(),
                                                     state.target_project_name
                                                 ),
@@ -561,9 +566,11 @@ pub fn show_screen_studio_ui(
 
                             bar.cell(|ui| {
                                 let btn = egui::Button::new(
-                                    RichText::new("💾 Export Folder").size(10.0),
+                                    RichText::new("Export Folder")
+                                        .size(9.5)
+                                        .color(RolandTheme::TEXT_PRIMARY),
                                 )
-                                .min_size(Vec2::new(ui.available_width(), 24.0));
+                                .min_size(Vec2::new(ui.available_width(), 22.0));
 
                                 if ui
                                     .add(btn)
@@ -581,7 +588,7 @@ pub fn show_screen_studio_ui(
                                         Ok(files) => {
                                             state.status_message = Some((
                                                 format!(
-                                                    "✓ Exported {} BMP files to {}",
+                                                    "Exported {} BMP files to {}",
                                                     files.len(),
                                                     folder.display()
                                                 ),
@@ -599,9 +606,9 @@ pub fn show_screen_studio_ui(
                             bar.cell(|ui| {
                                 let btn = egui::Button::selectable(
                                     state.show_hardware_guide,
-                                    RichText::new("? Steps").size(9.5),
+                                    RichText::new("Steps").size(9.5),
                                 )
-                                .min_size(Vec2::new(ui.available_width(), 24.0));
+                                .min_size(Vec2::new(ui.available_width(), 22.0));
 
                                 if ui.add(btn).clicked() {
                                     state.show_hardware_guide = !state.show_hardware_guide;
@@ -610,7 +617,7 @@ pub fn show_screen_studio_ui(
                         });
 
                     if state.show_hardware_guide {
-                        ui.add_space(4.0);
+                        ui.add_space(3.0);
                         egui::Frame::new()
                             .fill(RolandTheme::WELL_BG)
                             .stroke(Stroke::new(1.0, RolandTheme::BORDER_SUBTLE))
@@ -619,10 +626,10 @@ pub fn show_screen_studio_ui(
                             .show(ui, |ui| {
                                 ui.label(
                                     RichText::new(
-                                        "1. On SP-404MKII: SHIFT+PAD 14 → EXPORT → PROJECT to SD card.\n\
+                                        "1. On SP-404MKII: SHIFT+PAD 14 -> EXPORT -> PROJECT to SD card.\n\
                                          2. Click 'SYNC TO SD PROJECT' above to write the 1-bit BMPs.\n\
-                                         3. On SP-404MKII: SHIFT+PAD 13 (UTILITY) → SYSTEM → Screen Saver: Custom, \
-                                            then SHIFT+PAD 14 → IMPORT → PROJECT.",
+                                         3. On SP-404MKII: SHIFT+PAD 13 (UTILITY) -> SYSTEM -> Screen Saver: Custom, \
+                                            then SHIFT+PAD 14 -> IMPORT -> PROJECT.",
                                     )
                                     .size(9.0)
                                     .color(RolandTheme::ACCENT_AMBER),
@@ -631,10 +638,10 @@ pub fn show_screen_studio_ui(
                     }
 
                     if let Some((ref msg, is_err)) = state.status_message {
-                        ui.add_space(3.0);
+                        ui.add_space(2.0);
                         ui.label(
                             RichText::new(msg)
-                                .size(9.5)
+                                .size(9.0)
                                 .color(if is_err {
                                     RolandTheme::METER_RED
                                 } else {
