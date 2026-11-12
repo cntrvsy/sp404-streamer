@@ -381,6 +381,21 @@ pub fn build_sd_info(
     }
     existing_kits.sort();
 
+    let mut exported_projects = Vec::new();
+    let export_project_dir = mount.join("EXPORT").join("PROJECT");
+    if export_project_dir.is_dir()
+        && let Ok(entries) = fs::read_dir(&export_project_dir)
+    {
+        for entry in entries.flatten() {
+            if entry.path().is_dir()
+                && let Some(name) = entry.file_name().to_str()
+            {
+                exported_projects.push(name.to_string());
+            }
+        }
+    }
+    exported_projects.sort();
+
     Some(SdCardInfo {
         mount_path: mount.to_path_buf(),
         import_path: import_path.to_path_buf(),
@@ -390,6 +405,7 @@ pub fn build_sd_info(
         total_bytes: capacity.total_bytes,
         is_read_only: capacity.is_read_only,
         existing_kits,
+        exported_projects,
     })
 }
 

@@ -29,11 +29,21 @@ On Linux, Discord and Vesktop capture audio exclusively from application windows
 ### Sample Crate & SD Sync
 - **Multi-File & Folder Ingestion:** Native file dialogs with batch multi-selection and recursive directory scanning with kit auto-naming.
 - **Instant Auditioning:** Spacebar-triggered playback routed straight through the PipeWire monitor engine with immediate stop cutoff.
-- **Waveform Overview:** 128-bin transient display with duration, peak dBFS metrics, live playhead tracking, and interactive click/drag scrubbing.
+- **Waveform Overview & Auto-Chop Slicer:** 512-bin transient display with duration, peak dBFS metrics, live playhead tracking, interactive scrubbing, and transient/grid auto-chopping (`4/8/12/16` slices exported as `01_..16_` WAVs).
 - **Kit Arrangement:** Live search filtering and pad ordering (`01–16`) with manual controls or keyboard shortcuts.
-- **Hardware Conforming Engine:** Resamples audio to 48,000 Hz 16-bit linear PCM WAV, matching the SP-404MKII's native SD card import specification (preventing "File Not Supported" hardware rejection). Preserves mono files as single-channel mono to conserve SP-404MKII polyphony (1 voice instead of 2).
+- **Hardware Conforming Engine:** Resamples audio to 48,000 Hz 16-bit linear PCM WAV with optional **TPDF dithering**, **leading silence trimming**, and **de-click micro-fades**, matching the SP-404MKII's native SD card import specification (preventing "File Not Supported" hardware rejection). Preserves mono files as single-channel mono to conserve SP-404MKII polyphony (1 voice instead of 2).
 - **Display & FAT32 Sanitization:** Strips illegal FAT32 characters and formats filenames (default: 16 characters) for clean, readable rendering on the SP-404MKII OLED display.
-- **SD Hotplug & Safe Ejection:** Discovers SD cards via `udisks2`, checks hardware write-lock switches, verifies available disk capacity, executes kernel cache flushes (`sync_all()`), and unmounts safely with one click.
+- **SD Hotplug, `.tar.zst` Snapshots & Safe Ejection:** Discovers SD cards via `udisks2`, creates one-click compressed `.tar.zst` project backups in `~/Music/SP404-Backups/`, checks hardware write-lock switches, verifies available disk capacity, executes kernel cache flushes (`sync_all()`), and unmounts safely.
+
+### OLED Screen Studio (`128 × 64` 1-Bit BMP)
+- **GIF & Image Ingestion:** Load any animated `.gif`, `.png`, `.jpg`, `.webp`, or `.bmp` via native desktop portal dialogs, drag-and-drop, or Linux clipboard paste (`arboard`).
+- **Built-In Procedural Presets:** Test custom animations immediately with built-in *Cassette Tape Reels*, *Harmonic Oscilloscope*, and *SP-404 Beat Spectrum* animations.
+- **1-Bit Dithering & OLED Simulator:** Real-time Floyd-Steinberg, Bayer 4×4 retro grid, and hard threshold modes previewed on a dot-matrix `128 × 64` OLED simulator.
+- **One-Click Project Sync:** Writes exact 1,086-byte Windows v3 `BITMAPINFOHEADER` 1-bit monochrome BMPs (`startup_1..2.bmp` and `screen_saver_1..16.bmp`) into `EXPORT/PROJECT/PROJECT_XX/PICTURE/` with an inline hardware round-trip checklist.
+
+### USB MIDI Pad & EFX Deck (Verified Roland v5.00+ Spec)
+- **4×4 Virtual Pad Matrix:** Supports **MIDI Mode A** (Channels 1–10 per Bank A–J, notes `36–51`) and **MIDI Mode B** (Channel 1: Banks A–E, Channel 2: Banks F–J, notes `12–91`), firing strictly `Note On` messages via mouse or QWERTY hotkeys (`1-4 / Q-R / A-F / Z-V`).
+- **Bus 1–4 EFX Macro Knobs:** Studio rotary encoders mapped to `CC #16–18` (`CTRL 1–3`), `CC #19` (`EFX On/Off`), and `CC #83` (`EFX Type`), plus `Program Change` (`PC #0..15`) pattern triggers.
 
 ---
 

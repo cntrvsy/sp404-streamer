@@ -24,6 +24,8 @@ Use this skill to ensure every UI panel and custom widget in `sp404-streamer` co
 | **Corner Rounding** | `egui::Rounding::same(4.0)` | `egui::CornerRadius::same(4)` (takes `u8`) |
 | **Frame Margins** | `egui::Margin::symmetric(12.0, 10.0)` | `egui::Margin::symmetric(12, 10)` (takes `i8`) |
 | **`rect_stroke`** | `painter.rect_stroke(rect, rounding, stroke)` | `painter.rect_stroke(rect, CornerRadius::same(3), stroke, StrokeKind::Inside)` |
+| **Keyboard Focus Check** | `ctx.wants_keyboard_input()` | `ui.ctx().egui_wants_keyboard_input()` |
+| **Dropped File Path** | `dropped_file.path.clone()` (`Option<PathBuf>`) | `dropped_file.path().to_path_buf()` (`&Path` trait method) |
 | **`line_segment`** | `painter.line_segment([p1, p2], stroke)` | `painter.line_segment([p1, p2], stroke)` |
 | **Slider Trailing Fill** | `slider.trailing_fill(true)` | `slider.trailing_fill(true)` |
 
@@ -124,3 +126,4 @@ pub fn ui(self, ui: &mut Ui, size: Vec2) -> Response {
   3. Built-in procedural presets or one-click defaults where applicable.
 * **Hardware Round-Trip Checklists**:
   * Whenever an action requires follow-up steps on the physical SP-404MKII (e.g. `SHIFT + PAD 13` or `SHIFT + PAD 14`), display a concise, scannable hardware instruction pill directly inside the card rather than assuming the user has read the Roland manual.
+

@@ -10,6 +10,7 @@ pub struct WaveformView<'a> {
     is_playing: bool,
     progress: f32,
     height: f32,
+    slice_markers: &'a [f32],
 }
 
 impl<'a> WaveformView<'a> {
@@ -19,11 +20,17 @@ impl<'a> WaveformView<'a> {
             is_playing,
             progress,
             height: 48.0,
+            slice_markers: &[],
         }
     }
 
     pub fn height(mut self, height: f32) -> Self {
         self.height = height;
+        self
+    }
+
+    pub fn slice_markers(mut self, markers: &'a [f32]) -> Self {
+        self.slice_markers = markers;
         self
     }
 
@@ -109,7 +116,26 @@ impl<'a> WaveformView<'a> {
             );
         }
 
-        // 3. Hover scrub guide line
+        // 3. Draw Auto-Chop slice markers if active
+        for (idx, &ratio) in self.slice_markers.iter().enumerate() {
+            let slice_x = rect.left() + 4.0 + (ratio.clamp(0.0, 1.0) * inner_width);
+            painter.line_segment(
+                [
+                    Pos2::new(slice_x, rect.top() + 2.0),
+                    Pos2::new(slice_x, rect.bottom() - 2.0),
+                ],
+                Stroke::new(1.0, RolandTheme::ACCENT_CYAN),
+            );
+            painter.text(
+                Pos2::new(slice_x + 2.0, rect.top() + 3.0),
+                egui::Align2::LEFT_TOP,
+                format!("{:02}", idx + 1),
+                egui::FontId::monospace(7.5),
+                RolandTheme::ACCENT_CYAN,
+            );
+        }
+
+        // 4. Hover scrub guide line
         if response.hovered()
             && !response.dragged()
             && let Some(pos) = response.hover_pos()

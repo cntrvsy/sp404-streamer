@@ -4,6 +4,8 @@
 
 pub mod app;
 pub mod crate_view;
+pub mod midi_view;
+pub mod screen_view;
 pub mod theme;
 pub mod widgets;
 

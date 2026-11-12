@@ -46,6 +46,12 @@ pub struct ConformOptions {
     pub normalize_peak: bool,
     /// Target peak ceiling in dBFS (default: -0.5 dBFS)
     pub peak_ceiling_db: f32,
+    /// Strip leading digital silence (< -60 dBFS) up to 0.5ms before first transient
+    pub trim_start_silence: bool,
+    /// Apply 1.5ms fade-in and 3.0ms fade-out to prevent DC offset clicks
+    pub micro_fades: bool,
+    /// Apply Triangular Probability Density Function (TPDF) dither during 16-bit quantization
+    pub tpdf_dither: bool,
     /// Whether to prefix pad numbers (e.g. "01_", "02_") on export
     pub pad_numbered: bool,
     /// Max character length for base name (default: 16 chars for clean OLED readability)
@@ -57,6 +63,9 @@ impl Default for ConformOptions {
         Self {
             normalize_peak: true,
             peak_ceiling_db: -0.5,
+            trim_start_silence: true,
+            micro_fades: true,
+            tpdf_dither: true,
             pad_numbered: false,
             max_name_len: 16,
         }
@@ -75,6 +84,8 @@ pub struct SdCardInfo {
     pub is_read_only: bool,
     /// Existing kit folder names found under IMPORT/
     pub existing_kits: Vec<String>,
+    /// Exported hardware project folders found under EXPORT/PROJECT/ (e.g. "PROJECT_01")
+    pub exported_projects: Vec<String>,
 }
 
 impl SdCardInfo {
@@ -95,6 +106,15 @@ impl SdCardInfo {
         } else {
             "IMPORT".to_string()
         }
+    }
+
+    /// Resolves the `EXPORT/PROJECT/<project_name>/PICTURE` directory on this SD card.
+    pub fn project_picture_dir(&self, project_name: &str) -> PathBuf {
+        self.mount_path
+            .join("EXPORT")
+            .join("PROJECT")
+            .join(project_name)
+            .join("PICTURE")
     }
 }
 

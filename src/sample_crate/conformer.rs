@@ -196,6 +196,82 @@ impl DecodedAudio {
             }
         }
     }
+
+    /// Strips leading digital silence below `threshold_db` (e.g. -60.0 dBFS),
+    /// preserving a 0.5ms pre-roll before the first transient so pad hits have zero lag
+    /// without shaving the attack transient.
+    pub fn trim_start_silence(&mut self, threshold_db: f32) {
+        let n_frames = self.samples.first().map_or(0, Vec::len);
+        if n_frames == 0 {
+            return;
+        }
+
+        let threshold_linear = 10.0f32.powf(threshold_db / 20.0);
+        let mut first_active_frame = None;
+
+        'outer: for frame in 0..n_frames {
+            for ch in &self.samples {
+                if ch[frame].abs() >= threshold_linear {
+                    first_active_frame = Some(frame);
+                    break 'outer;
+                }
+            }
+        }
+
+        if let Some(active_idx) = first_active_frame {
+            // Preserve 0.5ms pre-roll (24 samples at 48kHz)
+            let preroll = (self.sample_rate as usize / 2000).max(1);
+            let trim_idx = active_idx.saturating_sub(preroll);
+            if trim_idx > 0 && trim_idx < n_frames {
+                for ch in &mut self.samples {
+                    ch.drain(0..trim_idx);
+                }
+            }
+        }
+    }
+
+    /// Applies a 1.5ms raised-cosine fade-in and 3.0ms fade-out to eliminate DC-offset
+    /// pops and truncation clicks when triggering pads on the SP-404MKII.
+    pub fn apply_micro_fades(&mut self) {
+        let n_frames = self.samples.first().map_or(0, Vec::len);
+        if n_frames < 8 {
+            return;
+        }
+
+        let fade_in_len = ((self.sample_rate as f32 * 0.0015) as usize).clamp(2, n_frames / 4);
+        let fade_out_len = ((self.sample_rate as f32 * 0.0030) as usize).clamp(2, n_frames / 3);
+
+        for ch in &mut self.samples {
+            for (i, sample) in ch.iter_mut().take(fade_in_len).enumerate() {
+                let phase = i as f32 / fade_in_len as f32;
+                let gain = 0.5 * (1.0 - (std::f32::consts::PI * phase).cos());
+                *sample *= gain;
+            }
+            for i in 0..fade_out_len {
+                let idx = n_frames - 1 - i;
+                let phase = i as f32 / fade_out_len as f32;
+                let gain = 0.5 * (1.0 - (std::f32::consts::PI * phase).cos());
+                ch[idx] *= gain;
+            }
+        }
+    }
+
+    /// Extracts a frame sub-slice `[start_frame..end_frame]` into a new `DecodedAudio`.
+    pub fn slice_range(&self, start_frame: usize, end_frame: usize) -> Self {
+        let n_frames = self.samples.first().map_or(0, Vec::len);
+        let start = start_frame.min(n_frames);
+        let end = end_frame.clamp(start, n_frames);
+        let sliced = self
+            .samples
+            .iter()
+            .map(|ch| ch[start..end].to_vec())
+            .collect();
+        Self {
+            channels: self.channels,
+            sample_rate: self.sample_rate,
+            samples: sliced,
+        }
+    }
 }
 
 /// Decodes any supported audio file into planar f32 memory buffers.
@@ -358,6 +434,41 @@ pub fn sanitize_filename(path: &Path, max_len: usize) -> String {
     cleaned
 }
 
+/// Fast deterministic xorshift32 PRNG for Triangular Probability Density Function (TPDF) dithering.
+struct TpdfDitherRng {
+    state: u32,
+}
+
+impl TpdfDitherRng {
+    const fn new(seed: u32) -> Self {
+        Self {
+            state: if seed == 0 { 0x6D2B_79F5 } else { seed },
+        }
+    }
+
+    #[inline]
+    fn next_u32(&mut self) -> u32 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.state = x;
+        x
+    }
+
+    /// Returns a uniform float in `[-0.5, 0.5]`
+    #[inline]
+    fn next_uniform_half(&mut self) -> f32 {
+        (self.next_u32() as f32 / u32::MAX as f32) - 0.5
+    }
+
+    /// Returns a triangular TPDF dither value in `[-1.0, 1.0]` LSB
+    #[inline]
+    fn next_tpdf_lsb(&mut self) -> f32 {
+        self.next_uniform_half() + self.next_uniform_half()
+    }
+}
+
 /// Writes processed audio to a 16-bit linear PCM WAV file (required for native SP-404MKII SD card import).
 ///
 /// Ensures mono samples are written as 1-channel mono WAV (saving polyphony)
@@ -372,9 +483,19 @@ pub fn export_conformed_wav(
     // 1. Resample to 48kHz
     processed.resample_to_48k()?;
 
-    // 2. Apply Peak Normalization if enabled
+    // 2. Strip leading silence if enabled
+    if options.trim_start_silence {
+        processed.trim_start_silence(-60.0);
+    }
+
+    // 3. Apply Peak Normalization if enabled
     if options.normalize_peak {
         processed.normalize_peak(options.peak_ceiling_db);
+    }
+
+    // 4. Apply de-click micro-fades if enabled
+    if options.micro_fades {
+        processed.apply_micro_fades();
     }
 
     let channels = processed.channels as u16;
@@ -404,11 +525,18 @@ pub fn export_conformed_wav(
         // 16-bit signed integer range: -32,768 to 32,767
         // SP-404MKII SD card import strictly requires 16-bit linear PCM (rejects 24-bit WAVs).
         const MAX_16BIT: f32 = 32_767.0;
+        let mut dither_rng = TpdfDitherRng::new(0xA404_C0DE);
 
         for frame in 0..n_frames {
             for ch in 0..processed.channels {
                 let sample = processed.samples[ch][frame].clamp(-1.0, 1.0);
-                let val_16bit = (sample * MAX_16BIT).round().clamp(-32768.0, 32767.0) as i16;
+                let scaled = sample * MAX_16BIT;
+                let dithered = if options.tpdf_dither {
+                    scaled + dither_rng.next_tpdf_lsb()
+                } else {
+                    scaled
+                };
+                let val_16bit = dithered.round().clamp(-32768.0, 32767.0) as i16;
                 writer.write_sample(val_16bit)?;
             }
         }
@@ -483,7 +611,10 @@ mod tests {
             "Mono input must produce 1-channel mono WAV"
         );
         assert_eq!(spec.sample_rate, 48000, "Sample rate must be 48kHz");
-        assert_eq!(spec.bits_per_sample, 16, "Bit depth must be 16-bit for SD card import");
+        assert_eq!(
+            spec.bits_per_sample, 16,
+            "Bit depth must be 16-bit for SD card import"
+        );
 
         // 2. Stereo test
         let stereo_audio = DecodedAudio {
@@ -597,5 +728,30 @@ mod tests {
         assert!(sd_info.existing_kits.contains(&"My_Kit".to_string()));
 
         let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_trim_start_silence_and_micro_fades() {
+        let mut samples = vec![0.0f32; 2000];
+        samples.extend(vec![0.8f32; 2000]);
+        let mut audio = DecodedAudio {
+            channels: 1,
+            sample_rate: 48000,
+            samples: vec![samples],
+        };
+
+        audio.trim_start_silence(-60.0);
+        // 2000 silent frames trimmed down to 24 preroll frames + 2000 active frames = 2024
+        assert_eq!(audio.samples[0].len(), 2024);
+
+        audio.apply_micro_fades();
+        assert!(
+            audio.samples[0][0].abs() < 1e-5,
+            "First sample must be faded to 0"
+        );
+        assert!(
+            audio.samples[0].last().unwrap().abs() < 1e-2,
+            "Last sample must be faded near 0"
+        );
     }
 }

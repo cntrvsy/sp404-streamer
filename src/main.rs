@@ -5,6 +5,8 @@
 //! via application window screen sharing.
 
 pub mod audio;
+pub mod midi;
+pub mod oled_studio;
 pub mod sample_crate;
 pub mod ui;
 

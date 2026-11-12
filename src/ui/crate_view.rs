@@ -13,11 +13,17 @@ use parking_lot::{Mutex, RwLock};
 use tracing::{error, warn};
 
 use crate::audio::PreviewPlayer;
+use crate::sample_crate::backup::{
+    BackupProgress, create_sd_snapshot, default_backup_dir, generate_snapshot_filename,
+};
 use crate::sample_crate::conformer::{
     DecodedAudio, decode_audio_file, export_conformed_wav, stage_audio_file,
 };
 use crate::sample_crate::model::{ConformOptions, SdCardInfo, StagedSample, UnmountedCard};
 use crate::sample_crate::sd_detector::{detect_sd_card_full, safe_eject};
+use crate::sample_crate::slicer::{
+    ChopMode, compute_slice_frames, export_chopped_slices, slice_frames_to_ratios,
+};
 use crate::ui::theme::RolandTheme;
 use crate::ui::widgets::WaveformView;
 
@@ -77,6 +83,12 @@ pub struct CrateState {
     pub status_message: Option<(String, bool)>, // (message, is_error)
     pub export_status: Arc<Mutex<ExportProgress>>,
     pub export_cancel_flag: Arc<AtomicBool>,
+    pub backup_status: Arc<Mutex<BackupProgress>>,
+    pub backup_cancel_flag: Arc<AtomicBool>,
+    pub auto_chop_enabled: bool,
+    pub chop_slice_count: usize,
+    pub chop_even_grid: bool,
+    pub chop_sensitivity: f32,
     pub search_filter: String,
 }
 
@@ -95,6 +107,12 @@ impl Default for CrateState {
             status_message: None,
             export_status: Arc::new(Mutex::new(ExportProgress::Idle)),
             export_cancel_flag: Arc::new(AtomicBool::new(false)),
+            backup_status: Arc::new(Mutex::new(BackupProgress::Idle)),
+            backup_cancel_flag: Arc::new(AtomicBool::new(false)),
+            auto_chop_enabled: false,
+            chop_slice_count: 16,
+            chop_even_grid: false,
+            chop_sensitivity: 0.65,
             search_filter: String::new(),
         }
     }
@@ -360,18 +378,63 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let backup_prog = state.backup_status.lock().clone();
+                    let is_backing_up = backup_prog.is_running();
+
                     let eject_btn = ui.add_enabled(
-                        !is_exporting,
+                        !is_exporting && !is_backing_up,
                         egui::Button::new(
                             RichText::new("Eject Card")
                                 .color(RolandTheme::TEXT_PRIMARY)
                                 .size(11.0),
                         ),
                     );
-                    if is_exporting {
-                        eject_btn.on_hover_text("Cannot eject while export is in progress");
+                    if is_exporting || is_backing_up {
+                        eject_btn.on_hover_text("Cannot eject while export or snapshot is in progress");
                     } else if eject_btn.clicked() {
                         eject_mount = Some((sd.mount_path.clone(), sd.device_node.clone()));
+                    }
+
+                    let snap_label = match backup_prog {
+                        BackupProgress::Running {
+                            files_done,
+                            total_files,
+                            ..
+                        } => {
+                            ui.ctx().request_repaint();
+                            format!("⏳ {files_done}/{total_files}")
+                        }
+                        _ => "📦 Snapshot (.tar.zst)".to_string(),
+                    };
+
+                    if ui
+                        .add_enabled(
+                            !is_exporting && !is_backing_up,
+                            egui::Button::new(
+                                RichText::new(snap_label)
+                                    .color(RolandTheme::ACCENT_AMBER)
+                                    .size(10.5)
+                                    .strong(),
+                            ),
+                        )
+                        .on_hover_text(
+                            "Create a full compressed .tar.zst snapshot of this SD card in ~/Music/SP404-Backups/",
+                        )
+                        .clicked()
+                    {
+                        let sd_root = sd.mount_path.clone();
+                        let dest_path =
+                            default_backup_dir().join(generate_snapshot_filename(&sd.label));
+                        let prog_arc = Arc::clone(&state.backup_status);
+                        let cancel_arc = Arc::clone(&state.backup_cancel_flag);
+                        cancel_arc.store(false, Ordering::Relaxed);
+                        std::thread::spawn(move || {
+                            if let Err(e) =
+                                create_sd_snapshot(&sd_root, &dest_path, &prog_arc, &cancel_arc)
+                            {
+                                *prog_arc.lock() = BackupProgress::Failed(e.to_string());
+                            }
+                        });
                     }
                 });
             } else if let Some(unmounted) = state.unmounted_cards.first() {
@@ -455,6 +518,35 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
 
     if needs_refresh {
         state.force_refresh_sd();
+    }
+
+    // Check if a background .tar.zst snapshot finished
+    let finished_backup = {
+        let mut guard = state.backup_status.lock();
+        match &*guard {
+            BackupProgress::Completed {
+                archive_path,
+                size_bytes,
+                file_count,
+            } => {
+                let mb = *size_bytes as f64 / (1024.0 * 1024.0);
+                let msg = format!(
+                    "✓ Saved SD snapshot ({file_count} files, {mb:.1} MB) to {}",
+                    archive_path.display()
+                );
+                *guard = BackupProgress::Idle;
+                Some((msg, false))
+            }
+            BackupProgress::Failed(err) => {
+                let msg = format!("Snapshot error: {err}");
+                *guard = BackupProgress::Idle;
+                Some((msg, true))
+            }
+            _ => None,
+        }
+    };
+    if let Some(status) = finished_backup {
+        state.status_message = Some(status);
     }
 
     if let Some(dev) = mount_candidate_dev {
@@ -856,75 +948,194 @@ fn render_staging_deck(ui: &mut Ui, state: &mut CrateState, preview_player: &Pre
 
         ui.add_space(4.0);
 
-        // Active Sample Waveform Strip with live playhead and scrubbing
+        // Active Sample Waveform Strip with live playhead, scrubbing, and Auto-Chop Slicer
         if let Some(idx) = state.selected_index
-            && let Some(sample) = state.staged_samples.get(idx) {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("SELECTED: {}.wav", sample.clean_name))
-                            .color(RolandTheme::TEXT_PRIMARY)
-                            .size(10.0)
-                            .strong(),
-                    );
-                    ui.label(
-                        RichText::new(format!(
-                            "Peak: {} | Duration: {}",
-                            sample.peak_db_formatted(),
-                            sample.duration_formatted()
-                        ))
-                        .color(RolandTheme::TEXT_SECONDARY)
-                        .size(10.0),
-                    );
+            && let Some(sample) = state.staged_samples.get(idx).cloned()
+        {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("SELECTED: {}.wav", sample.clean_name))
+                        .color(RolandTheme::TEXT_PRIMARY)
+                        .size(10.0)
+                        .strong(),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "Peak: {} | {}",
+                        sample.peak_db_formatted(),
+                        sample.duration_formatted()
+                    ))
+                    .color(RolandTheme::TEXT_SECONDARY)
+                    .size(10.0),
+                );
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new("Click or drag waveform to scrub")
-                                .color(RolandTheme::TEXT_MUTED)
-                                .size(9.5),
-                        );
-                    });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .selectable_label(
+                            state.auto_chop_enabled,
+                            RichText::new("✂ Auto-Chop")
+                                .size(9.5)
+                                .color(if state.auto_chop_enabled {
+                                    RolandTheme::TEXT_ON_ACCENT
+                                } else {
+                                    RolandTheme::ACCENT_CYAN
+                                })
+                                .strong(),
+                        )
+                        .on_hover_text(
+                            "Slice loop into numbered individual WAV files (01_..16_) for SP-404 pad import",
+                        )
+                        .clicked()
+                    {
+                        state.auto_chop_enabled = !state.auto_chop_enabled;
+                    }
                 });
+            });
 
-                let is_playing = preview_player.is_playing();
-                let progress = preview_player.progress();
-                let (_resp, seek_ratio) = WaveformView::new(
-                    &sample.waveform_overview,
-                    is_playing,
-                    progress,
-                )
-                .show(ui);
-
-                if let Some(ratio) = seek_ratio {
-                    let path = sample.source_path.clone();
-                    let cache = Arc::clone(&state.decoded_cache);
-
-                    let audio = {
-                        let read = cache.read();
-                        read.get(&path).cloned()
-                    };
-
-                    let audio_to_play = audio.unwrap_or_else(|| {
-                        match decode_audio_file(&path) {
-                            Ok(decoded) => {
-                                cache.write().insert(path, decoded.clone());
-                                decoded
-                            }
-                            Err(e) => {
-                                error!("Failed to decode for scrub preview: {e}");
-                                DecodedAudio {
-                                    channels: 1,
-                                    sample_rate: 48000,
-                                    samples: vec![Vec::new()],
-                                }
-                            }
-                        }
-                    });
-
-                    if !audio_to_play.samples.is_empty() && !audio_to_play.samples[0].is_empty() {
-                        preview_player.play_at(audio_to_play, ratio);
+            // Decode audio into cache if needed for scrub or auto-chop
+            let ensure_decoded = |path: &Path, cache: &Arc<RwLock<HashMap<PathBuf, DecodedAudio>>>| {
+                if let Some(cached) = cache.read().get(path).cloned() {
+                    return Some(cached);
+                }
+                match decode_audio_file(path) {
+                    Ok(decoded) => {
+                        cache.write().insert(path.to_path_buf(), decoded.clone());
+                        Some(decoded)
+                    }
+                    Err(e) => {
+                        error!("Failed to decode sample: {e}");
+                        None
                     }
                 }
+            };
+
+            let (slice_frames, slice_ratios) = if state.auto_chop_enabled
+                && let Some(decoded) = ensure_decoded(&sample.source_path, &state.decoded_cache)
+            {
+                let mode = if state.chop_even_grid {
+                    ChopMode::EvenGrid
+                } else {
+                    ChopMode::Transient {
+                        sensitivity: state.chop_sensitivity,
+                    }
+                };
+                let frames = compute_slice_frames(&decoded, state.chop_slice_count, mode);
+                let ratios = slice_frames_to_ratios(&decoded, &frames);
+                (frames, ratios)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
+            let is_playing = preview_player.is_playing();
+            let progress = preview_player.progress();
+            let (_resp, seek_ratio) = WaveformView::new(
+                &sample.waveform_overview,
+                is_playing,
+                progress,
+            )
+            .slice_markers(&slice_ratios)
+            .show(ui);
+
+            if let Some(ratio) = seek_ratio
+                && let Some(audio_to_play) =
+                    ensure_decoded(&sample.source_path, &state.decoded_cache)
+                && !audio_to_play.samples.is_empty()
+                && !audio_to_play.samples[0].is_empty()
+            {
+                preview_player.play_at(audio_to_play, ratio);
             }
+
+            if state.auto_chop_enabled {
+                ui.add_space(3.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("SLICES:")
+                            .size(9.0)
+                            .color(RolandTheme::ACCENT_CYAN)
+                            .monospace()
+                            .strong(),
+                    );
+                    for &cnt in &[4usize, 8, 12, 16] {
+                        if ui
+                            .selectable_label(
+                                state.chop_slice_count == cnt,
+                                RichText::new(format!("{cnt}")).size(9.5).monospace(),
+                            )
+                            .clicked()
+                        {
+                            state.chop_slice_count = cnt;
+                        }
+                    }
+
+                    ui.checkbox(
+                        &mut state.chop_even_grid,
+                        RichText::new("Even Grid").size(9.5),
+                    )
+                    .on_hover_text("Switch between transient onset detection and equal-length grid slices");
+
+                    if !state.chop_even_grid {
+                        ui.add(
+                            egui::Slider::new(&mut state.chop_sensitivity, 0.1..=0.95)
+                                .text("Sens")
+                                .show_value(false)
+                                .trailing_fill(true),
+                        );
+                    }
+
+                    let can_chop_sd = state
+                        .detected_sd
+                        .as_ref()
+                        .is_some_and(|sd| !sd.is_read_only);
+                    if ui
+                        .add_enabled(
+                            can_chop_sd,
+                            egui::Button::new(
+                                RichText::new(format!("⚡ Export {} Slices", slice_frames.len()))
+                                    .size(9.5)
+                                    .color(if can_chop_sd {
+                                        RolandTheme::ACCENT_ORANGE
+                                    } else {
+                                        RolandTheme::TEXT_MUTED
+                                    })
+                                    .strong(),
+                            ),
+                        )
+                        .on_hover_text(
+                            "Exports numbered 16-bit/48kHz WAV slices (01_..16_) into IMPORT/<Kit_Name>/.\n\
+                             Assign them to pads on the SP-404MKII via SHIFT + PAD 14 → IMPORT → SAMPLE.",
+                        )
+                        .clicked()
+                        && let Some(ref sd) = state.detected_sd
+                        && let Some(decoded) =
+                            ensure_decoded(&sample.source_path, &state.decoded_cache)
+                    {
+                        let dest_dir = sd.import_path.join(&state.target_folder_name);
+                        match export_chopped_slices(
+                            &decoded,
+                            &slice_frames,
+                            &sample.clean_name,
+                            &dest_dir,
+                            &state.options,
+                        ) {
+                            Ok(written) => {
+                                state.status_message = Some((
+                                    format!(
+                                        "✓ Exported {} slices to {}/ (Use SHIFT+PAD 14 on SP-404 to assign)",
+                                        written.len(),
+                                        state.target_folder_name
+                                    ),
+                                    false,
+                                ));
+                            }
+                            Err(e) => {
+                                state.status_message =
+                                    Some((format!("Auto-chop export error: {e}"), true));
+                            }
+                        }
+                    }
+                });
+            }
+        }
     });
 }
 
@@ -1014,6 +1225,32 @@ fn render_export_deck(ui: &mut Ui, state: &mut CrateState) {
                             .size(10.5),
                     );
                 });
+            });
+
+            ui.horizontal(|ui| {
+                ui.add_enabled(
+                    !is_exporting,
+                    egui::Checkbox::new(&mut state.options.trim_start_silence, "Trim Start Silence"),
+                )
+                .on_hover_text(
+                    "Strips leading digital silence (< -60 dBFS) down to 0.5ms before the attack transient so pads trigger with zero lag.",
+                );
+
+                ui.add_enabled(
+                    !is_exporting,
+                    egui::Checkbox::new(&mut state.options.micro_fades, "De-Click Fades"),
+                )
+                .on_hover_text(
+                    "Applies a 1.5ms fade-in and 3.0ms fade-out to prevent DC-offset clicks and truncation pops.",
+                );
+
+                ui.add_enabled(
+                    !is_exporting,
+                    egui::Checkbox::new(&mut state.options.tpdf_dither, "16-Bit TPDF Dither"),
+                )
+                .on_hover_text(
+                    "Applies Triangular Probability Density Function dithering when quantizing 24/32-bit studio files to 16-bit PCM.",
+                );
             });
 
             // Live explanatory microcopy below checkboxes

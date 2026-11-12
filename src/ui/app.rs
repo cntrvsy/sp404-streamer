@@ -15,15 +15,21 @@ use crate::audio::command::AudioCommand;
 use crate::audio::preview_player::PreviewPlayer;
 use crate::audio::state::SharedAudioState;
 use crate::ui::crate_view::{self, CrateState};
+use crate::ui::midi_view::{self, MidiDeckState};
+use crate::ui::screen_view::{self, ScreenStudioState};
 use crate::ui::theme::RolandTheme;
 use crate::ui::widgets::vu_meter::VuMeterWidget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, EnumIter, IntoStaticStr)]
 pub enum AppTab {
-    #[strum(to_string = "STREAM HUD")]
+    #[strum(to_string = "STREAM")]
     StreamHud,
-    #[strum(to_string = "SAMPLE CRATE")]
+    #[strum(to_string = "CRATE")]
     SampleCrate,
+    #[strum(to_string = "OLED STUDIO")]
+    OledStudio,
+    #[strum(to_string = "MIDI DECK")]
+    MidiDeck,
 }
 
 pub struct Sp404StreamerApp {
@@ -31,6 +37,8 @@ pub struct Sp404StreamerApp {
     command_sender: mpsc::Sender<AudioCommand>,
     preview_player: PreviewPlayer,
     crate_state: CrateState,
+    screen_state: ScreenStudioState,
+    midi_state: MidiDeckState,
     current_tab: AppTab,
 
     // Smooth peak hold
@@ -69,6 +77,8 @@ impl Sp404StreamerApp {
             command_sender,
             preview_player,
             crate_state: CrateState::default(),
+            screen_state: ScreenStudioState::default(),
+            midi_state: MidiDeckState::default(),
             current_tab: AppTab::StreamHud,
             peak_hold_l: -60.0,
             peak_hold_r: -60.0,
@@ -492,6 +502,12 @@ impl eframe::App for Sp404StreamerApp {
             AppTab::SampleCrate => {
                 crate_view::render_crate_view(ui, &mut self.crate_state, &self.preview_player);
             }
+            AppTab::OledStudio => {
+                screen_view::show_screen_studio_ui(ui, &mut self.screen_state);
+            }
+            AppTab::MidiDeck => {
+                midi_view::show_midi_deck_ui(ui, &mut self.midi_state);
+            }
         }
 
         ui.add_space(4.0);
@@ -507,33 +523,28 @@ impl eframe::App for Sp404StreamerApp {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    if self.current_tab == AppTab::StreamHud {
-                        ui.label(
-                            RichText::new("DISCORD / OBS:")
-                                .size(9.0)
-                                .color(RolandTheme::ACCENT_AMBER)
-                                .monospace()
-                                .strong(),
-                        );
-                        ui.label(
-                            RichText::new("Share window to stream audio")
-                                .size(9.0)
-                                .color(RolandTheme::TEXT_MUTED),
-                        );
-                    } else {
-                        ui.label(
-                            RichText::new("CONFORM TARGET:")
-                                .size(9.0)
-                                .color(RolandTheme::ACCENT_AMBER)
-                                .monospace()
-                                .strong(),
-                        );
-                        ui.label(
-                            RichText::new("48kHz • 16-bit PCM (SD Native)")
-                                .size(9.0)
-                                .color(RolandTheme::TEXT_MUTED),
-                        );
-                    }
+                    let (badge_label, detail_label) = match self.current_tab {
+                        AppTab::StreamHud => ("DISCORD / OBS:", "Share window to stream audio"),
+                        AppTab::SampleCrate => {
+                            ("CONFORM TARGET:", "48kHz • 16-bit PCM (SD Native)")
+                        }
+                        AppTab::OledStudio => {
+                            ("OLED TARGET:", "128×64 • 1-bit BMP (PROJECT_XX/PICTURE)")
+                        }
+                        AppTab::MidiDeck => ("MIDI SPEC:", "Roland v5.00+ • Note-On & CC #16-19"),
+                    };
+                    ui.label(
+                        RichText::new(badge_label)
+                            .size(9.0)
+                            .color(RolandTheme::ACCENT_AMBER)
+                            .monospace()
+                            .strong(),
+                    );
+                    ui.label(
+                        RichText::new(detail_label)
+                            .size(9.0)
+                            .color(RolandTheme::TEXT_MUTED),
+                    );
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.hyperlink_to(
@@ -564,16 +575,32 @@ impl eframe::App for Sp404StreamerApp {
 
         // --- ADAPTIVE REPAINT RATE ---
         let ctx = ui.ctx().clone();
-        if self.current_tab == AppTab::SampleCrate {
-            if self.preview_player.is_playing() {
-                ctx.request_repaint_after(Duration::from_millis(16));
-            } else {
-                ctx.request_repaint_after(Duration::from_millis(100));
+        match self.current_tab {
+            AppTab::SampleCrate => {
+                if self.preview_player.is_playing() {
+                    ctx.request_repaint_after(Duration::from_millis(16));
+                } else {
+                    ctx.request_repaint_after(Duration::from_millis(100));
+                }
             }
-        } else if is_connected && (cur_l > -55.0 || cur_r > -55.0) {
-            ctx.request_repaint_after(Duration::from_millis(16));
-        } else {
-            ctx.request_repaint_after(Duration::from_millis(120));
+            AppTab::OledStudio => {
+                if self.screen_state.is_playing {
+                    let frame_ms = (1000 / self.screen_state.fps.max(1)).clamp(30, 250) as u64;
+                    ctx.request_repaint_after(Duration::from_millis(frame_ms));
+                } else {
+                    ctx.request_repaint_after(Duration::from_millis(120));
+                }
+            }
+            AppTab::MidiDeck => {
+                ctx.request_repaint_after(Duration::from_millis(50));
+            }
+            AppTab::StreamHud => {
+                if is_connected && (cur_l > -55.0 || cur_r > -55.0) {
+                    ctx.request_repaint_after(Duration::from_millis(16));
+                } else {
+                    ctx.request_repaint_after(Duration::from_millis(120));
+                }
+            }
         }
     }
 }
