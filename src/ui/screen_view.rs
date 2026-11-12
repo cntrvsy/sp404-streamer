@@ -184,28 +184,29 @@ pub fn show_screen_studio_ui(
         }
     }
 
-    // Calculate dynamic height for the bottom Dither & Sync card so expandable guide or status never clips
-    let mut bottom_card_h = 152.0;
+    // Dynamic bottom deck budget for Ingest + Dither + Project Sync + Guide
+    let mut bottom_deck_h = 176.0;
     if state.show_hardware_guide {
-        bottom_card_h += 54.0;
+        bottom_deck_h += 52.0;
     }
     if state.status_message.is_some() {
-        bottom_card_h += 20.0;
+        bottom_deck_h += 20.0;
     }
 
+    // Universal 2-Deck Model: Upper OLED Stage (Hero) + Lower Ingest/Dither/Sync Deck
     StripBuilder::new(ui)
-        .size(Size::remainder().at_least(190.0))
+        .size(Size::remainder().at_least(180.0))
         .size(Size::exact(RolandTheme::CARD_GAP))
-        .size(Size::exact(bottom_card_h))
+        .size(Size::exact(bottom_deck_h))
         .vertical(|mut strip| {
             // ================================================================
-            // TOP CARD (Remainder): 128×64 OLED Display Simulator & Source Bay
+            // UPPER HERO STAGE (Remainder): Authentic 128×64 OLED Screen & Transport
             // ================================================================
             strip.cell(|ui| {
                 RolandTheme::rack_card_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let mut amber = state.amber_preview;
-                    RolandTheme::section_header(ui, "OLED DISPLAY SIMULATOR (128×64)", |ui| {
+                    RolandTheme::section_header(ui, "HARDWARE OLED SIMULATOR (128×64)", |ui| {
                         if ui
                             .checkbox(&mut amber, RichText::new("Amber Tint").size(9.5))
                             .on_hover_text("Toggle between Classic White OLED and Roland Amber preview")
@@ -222,7 +223,82 @@ pub fn show_screen_studio_ui(
                         );
                     });
 
-                    // Row 1: Symmetrical 3-column Ingestion & Preset Bar
+                    // 1. Hero OLED Bezel: Reserving 30px for Transport Scrubber below it
+                    let bezel_avail_h = (ui.available_height() - 32.0).max(96.0);
+                    ui.allocate_ui(Vec2::new(ui.available_width(), bezel_avail_h), |ui| {
+                        if let Some(frame) = state.mono_frames.get(state.current_frame) {
+                            let resp = OledDisplayWidget::new(
+                                frame,
+                                state.amber_preview,
+                                state.current_frame,
+                                state.mono_frames.len(),
+                            )
+                            .show(ui);
+                            if resp.clicked() {
+                                state.is_playing = !state.is_playing;
+                            }
+                        }
+                    });
+
+                    ui.add_space(4.0);
+
+                    // 2. Docked Transport Bar: Full-Width Frame Scrubber & Playhead Controls
+                    ui.horizontal(|ui| {
+                        let play_label = if state.is_playing {
+                            "⏸ Pause"
+                        } else {
+                            "▶ Play"
+                        };
+                        if ui
+                            .add_sized(
+                                Vec2::new(68.0, 20.0),
+                                egui::Button::new(RichText::new(play_label).size(10.0).strong()),
+                            )
+                            .clicked()
+                        {
+                            state.is_playing = !state.is_playing;
+                        }
+
+                        let max_idx = state.mono_frames.len().saturating_sub(1);
+                        let mut frame_num = state.current_frame + 1;
+                        ui.spacing_mut().slider_width = (ui.available_width() - 95.0).max(80.0);
+                        if ui
+                            .add(
+                                Slider::new(&mut frame_num, 1..=(max_idx + 1).max(1))
+                                    .prefix("Frame ")
+                                    .trailing_fill(true),
+                            )
+                            .changed()
+                        {
+                            state.is_playing = false;
+                            state.current_frame = (frame_num - 1).min(max_idx);
+                        }
+                    });
+                });
+            });
+
+            strip.cell(|_ui| {});
+
+            // ================================================================
+            // LOWER CONTROL DECK: Ingestion, 1-Bit Dither & Project Sync
+            // ================================================================
+            strip.cell(|ui| {
+                let mut changed = false;
+
+                RolandTheme::rack_card_frame().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    RolandTheme::section_header(ui, "INGESTION, DITHER & PROJECT SYNC", |ui| {
+                        if ui
+                            .small_button("↺ Reset Dither")
+                            .on_hover_text("Reset dithering and contrast controls to defaults")
+                            .clicked()
+                        {
+                            state.adjustments = OledAdjustments::default();
+                            changed = true;
+                        }
+                    });
+
+                    // Row 1: Source Ingestion & Preset Bar
                     StripBuilder::new(ui)
                         .size(Size::relative(0.36))
                         .size(Size::relative(0.24))
@@ -230,12 +306,12 @@ pub fn show_screen_studio_ui(
                         .horizontal(|mut row| {
                             row.cell(|ui| {
                                 let btn = egui::Button::new(
-                                    RichText::new("📂 Load GIF / Image")
-                                        .size(10.0)
+                                    RichText::new("📂 Load GIF/Image")
+                                        .size(9.5)
                                         .color(RolandTheme::ACCENT_ORANGE)
                                         .strong(),
                                 )
-                                .min_size(Vec2::new(ui.available_width(), 22.0));
+                                .min_size(Vec2::new(ui.available_width(), 20.0));
 
                                 if ui
                                     .add(btn)
@@ -256,9 +332,9 @@ pub fn show_screen_studio_ui(
 
                             row.cell(|ui| {
                                 let btn = egui::Button::new(
-                                    RichText::new("📋 Paste Clipboard").size(10.0),
+                                    RichText::new("📋 Paste").size(9.5),
                                 )
-                                .min_size(Vec2::new(ui.available_width(), 22.0));
+                                .min_size(Vec2::new(ui.available_width(), 20.0));
 
                                 if ui
                                     .add(btn)
@@ -276,7 +352,7 @@ pub fn show_screen_studio_ui(
                                 egui::ComboBox::from_id_salt("oled_demo_preset")
                                     .selected_text(
                                         RichText::new(format!("Preset: {chosen_preset}"))
-                                            .size(10.0),
+                                            .size(9.5),
                                     )
                                     .width(ui.available_width())
                                     .show_ui(ui, |ui| {
@@ -296,84 +372,9 @@ pub fn show_screen_studio_ui(
 
                     ui.add_space(4.0);
 
-                    // Row 2: Fluid OLED Bezel (reserving 28px at bottom of card for Transport)
-                    let bezel_avail_h = (ui.available_height() - 28.0).max(96.0);
-                    ui.allocate_ui(Vec2::new(ui.available_width(), bezel_avail_h), |ui| {
-                        if let Some(frame) = state.mono_frames.get(state.current_frame) {
-                            let resp = OledDisplayWidget::new(
-                                frame,
-                                state.amber_preview,
-                                state.current_frame,
-                                state.mono_frames.len(),
-                            )
-                            .show(ui);
-                            if resp.clicked() {
-                                state.is_playing = !state.is_playing;
-                            }
-                        }
-                    });
-
-                    ui.add_space(4.0);
-
-                    // Row 3: Aligned Transport Scrubber Bar
-                    ui.horizontal(|ui| {
-                        let play_label = if state.is_playing {
-                            "⏸ Pause"
-                        } else {
-                            "▶ Play"
-                        };
-                        if ui
-                            .add_sized(
-                                Vec2::new(68.0, 20.0),
-                                egui::Button::new(RichText::new(play_label).size(10.0).strong()),
-                            )
-                            .clicked()
-                        {
-                            state.is_playing = !state.is_playing;
-                        }
-
-                        let max_idx = state.mono_frames.len().saturating_sub(1);
-                        let mut frame_num = state.current_frame + 1;
-                        ui.spacing_mut().slider_width =
-                            (ui.available_width() - 95.0).max(80.0);
-                        if ui
-                            .add(
-                                Slider::new(&mut frame_num, 1..=(max_idx + 1).max(1))
-                                    .prefix("Frame ")
-                                    .trailing_fill(true),
-                            )
-                            .changed()
-                        {
-                            state.is_playing = false;
-                            state.current_frame = (frame_num - 1).min(max_idx);
-                        }
-                    });
-                });
-            });
-
-            strip.cell(|_ui| {});
-
-            // ================================================================
-            // BOTTOM CARD: 2-Column Aligned Dither & SD Project Sync Deck
-            // ================================================================
-            strip.cell(|ui| {
-                let mut changed = false;
-
-                RolandTheme::rack_card_frame().show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    RolandTheme::section_header(ui, "1-BIT DITHER & PROJECT SYNC", |ui| {
-                        if ui
-                            .small_button("↺ Reset Dither")
-                            .on_hover_text("Reset dithering and contrast controls to defaults")
-                            .clicked()
-                        {
-                            state.adjustments = OledAdjustments::default();
-                            changed = true;
-                        }
-                    });
-
+                    // Row 2: 2-Column Form Grid (Dither Mode, Threshold/Contrast, SD Project)
                     RolandTheme::form_grid(ui, "oled_dither_sync_grid", |ui| {
-                        // Row 1: Dither Mode + Invert
+                        // Row A: Dither Mode + Invert
                         RolandTheme::grid_label(ui, "DITHER MODE");
                         ui.horizontal(|ui| {
                             let combo_w = (ui.available_width() - 95.0).max(130.0);
@@ -401,7 +402,7 @@ pub fn show_screen_studio_ui(
                             if ui
                                 .checkbox(
                                     &mut state.adjustments.invert,
-                                    RichText::new("Invert B/W").size(10.0),
+                                    RichText::new("Invert B/W").size(9.5),
                                 )
                                 .changed()
                             {
@@ -410,7 +411,7 @@ pub fn show_screen_studio_ui(
                         });
                         ui.end_row();
 
-                        // Row 2: Threshold & Contrast Sliders
+                        // Row B: Threshold & Contrast Sliders
                         RolandTheme::grid_label(ui, "THRESH / CONT");
                         StripBuilder::new(ui)
                             .size(Size::relative(0.5))
@@ -453,7 +454,7 @@ pub fn show_screen_studio_ui(
                             });
                         ui.end_row();
 
-                        // Row 3: SD Project Slot & Target Pack
+                        // Row C: SD Project Slot & Target Pack
                         RolandTheme::grid_label(ui, "SD PROJECT");
                         ui.horizontal(|ui| {
                             egui::ComboBox::from_id_salt("oled_project_slot")
@@ -499,7 +500,7 @@ pub fn show_screen_studio_ui(
 
                     ui.add_space(4.0);
 
-                    // Row 4: Symmetrical Action Bar
+                    // Row 3: Primary Symmetrical Action Bar
                     let sd_ready = detected_sd.is_some_and(|sd| !sd.is_read_only);
                     StripBuilder::new(ui)
                         .size(Size::relative(0.48))

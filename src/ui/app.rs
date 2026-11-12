@@ -373,14 +373,15 @@ impl Sp404StreamerApp {
         is_clipped_l: bool,
         is_clipped_r: bool,
     ) {
+        // Universal 2-Deck Model: Upper Visual Stage (Remainder) + Lower Control Deck (Exact 138px)
         StripBuilder::new(ui)
-            .size(Size::exact(92.0))
+            .size(Size::remainder().at_least(180.0))
             .size(Size::exact(RolandTheme::CARD_GAP))
-            .size(Size::exact(132.0))
-            .size(Size::exact(RolandTheme::CARD_GAP))
-            .size(Size::remainder())
+            .size(Size::exact(138.0))
             .vertical(|mut strip| {
-                // CARD 1: SIGNAL METERING
+                // ================================================================
+                // UPPER STAGE (Remainder): Master VU Console & Connection Readout
+                // ================================================================
                 strip.cell(|ui| {
                     let peak_max = cur_l.max(cur_r);
                     let peak_color = if peak_max >= -0.1 {
@@ -396,9 +397,11 @@ impl Sp404StreamerApp {
                         format!("MAX PEAK: {peak_max:.1} dBFS")
                     };
 
+                    let device_desc = self.state.device_name.read().clone();
+
                     RolandTheme::rack_card_frame().show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        RolandTheme::section_header(ui, "MASTER INPUT LEVEL", |ui| {
+                        RolandTheme::section_header(ui, "MASTER VU CONSOLE", |ui| {
                             ui.label(
                                 RichText::new(peak_str)
                                     .size(9.0)
@@ -408,20 +411,76 @@ impl Sp404StreamerApp {
                             );
                         });
 
-                        let meter_w = ui.available_width();
-                        VuMeterWidget::new("L", cur_l, self.peak_hold_l, is_clipped_l)
-                            .ui(ui, meter_w, 16.0);
-                        ui.add_space(2.0);
-                        VuMeterWidget::new("R", cur_r, self.peak_hold_r, is_clipped_r)
-                            .ui(ui, meter_w, 16.0);
-                        ui.add_space(2.0);
-                        VuMeterWidget::draw_scale(ui, meter_w, 12.0);
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(6.0);
+                            let meter_w = ui.available_width();
+                            VuMeterWidget::new("L", cur_l, self.peak_hold_l, is_clipped_l)
+                                .ui(ui, meter_w, 20.0);
+                            ui.add_space(4.0);
+                            VuMeterWidget::new("R", cur_r, self.peak_hold_r, is_clipped_r)
+                                .ui(ui, meter_w, 20.0);
+                            ui.add_space(3.0);
+                            VuMeterWidget::draw_scale(ui, meter_w, 14.0);
+                        });
+
+                        ui.add_space(10.0);
+
+                        // Integrated Stream Telemetry Readout Box inside Master Stage
+                        egui::Frame::new()
+                            .fill(RolandTheme::WELL_BG)
+                            .stroke(Stroke::new(1.0, RolandTheme::BORDER_SUBTLE))
+                            .corner_radius(CornerRadius::same(4))
+                            .inner_margin(egui::Margin::symmetric(10, 8))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                RolandTheme::form_grid(ui, "stream_master_telemetry", |ui| {
+                                    RolandTheme::grid_label(ui, "DEVICE");
+                                    ui.label(
+                                        RichText::new(&device_desc)
+                                            .size(9.5)
+                                            .color(RolandTheme::TEXT_PRIMARY)
+                                            .monospace(),
+                                    );
+                                    ui.end_row();
+
+                                    RolandTheme::grid_label(ui, "PIPEWIRE");
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(if is_connected {
+                                                "● 48kHz Stereo Float32 (Active Link)"
+                                            } else {
+                                                "○ Scanning USB Audio Ports..."
+                                            })
+                                            .size(9.5)
+                                            .color(if is_connected {
+                                                RolandTheme::METER_GREEN
+                                            } else {
+                                                RolandTheme::ACCENT_AMBER
+                                            })
+                                            .monospace(),
+                                        );
+                                    });
+                                    ui.end_row();
+
+                                    RolandTheme::grid_label(ui, "DISCORD OBS");
+                                    ui.label(
+                                        RichText::new(
+                                            "Share this window in Discord to stream uncompressed sampler audio",
+                                        )
+                                        .size(9.0)
+                                        .color(RolandTheme::TEXT_MUTED),
+                                    );
+                                    ui.end_row();
+                                });
+                            });
                     });
                 });
 
                 strip.cell(|_ui| {});
 
-                // CARD 2: MONITOR & ROUTING
+                // ================================================================
+                // LOWER CONTROL DECK (Exact 138px): Monitor Volume & Output Routing
+                // ================================================================
                 strip.cell(|ui| {
                     RolandTheme::rack_card_frame().show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -571,63 +630,6 @@ impl Sp404StreamerApp {
                                     }
                                 });
                             });
-                            ui.end_row();
-                        });
-                    });
-                });
-
-                strip.cell(|_ui| {});
-
-                // CARD 3: PIPEWIRE STREAM TELEMETRY
-                strip.cell(|ui| {
-                    RolandTheme::rack_card_frame().show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        let device_desc = self.state.device_name.read().clone();
-                        RolandTheme::section_header(ui, "PIPEWIRE STREAM TELEMETRY", |ui| {
-                            ui.label(
-                                RichText::new(device_desc)
-                                    .size(9.0)
-                                    .color(RolandTheme::TEXT_MUTED)
-                                    .monospace(),
-                            );
-                        });
-
-                        RolandTheme::form_grid(ui, "stream_telemetry_grid", |ui| {
-                            RolandTheme::grid_label(ui, "USB STATUS");
-                            ui.label(
-                                RichText::new(if is_connected {
-                                    "Connected (SP-404MKII Mix Out)"
-                                } else {
-                                    "Waiting for SP-404MKII USB-C audio..."
-                                })
-                                .size(9.5)
-                                .color(if is_connected {
-                                    RolandTheme::METER_GREEN
-                                } else {
-                                    RolandTheme::ACCENT_AMBER
-                                }),
-                            );
-                            ui.end_row();
-
-                            RolandTheme::grid_label(ui, "FORMAT");
-                            ui.label(
-                                RichText::new(
-                                    "48000 Hz • Stereo • Linear Float32 (PipeWire Native)",
-                                )
-                                .size(9.5)
-                                .color(RolandTheme::TEXT_SECONDARY)
-                                .monospace(),
-                            );
-                            ui.end_row();
-
-                            RolandTheme::grid_label(ui, "DISCORD SETUP");
-                            ui.label(
-                                RichText::new(
-                                    "Share this window in Discord/Vesktop to stream 48kHz audio",
-                                )
-                                .size(9.5)
-                                .color(RolandTheme::TEXT_MUTED),
-                            );
                             ui.end_row();
                         });
                     });
