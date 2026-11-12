@@ -35,18 +35,34 @@ Use this skill to ensure every UI panel and custom widget in `sp404-streamer` co
 
 The app targets a compact floating window (`480 × 545` default, `380 × 360` minimum) for Wayland tiling compositors (`niri`, `Hyprland`, `Sway`).
 
-1. **Rack Card Hierarchy**:
+1. **Root Window Shell (Pinned Header, Fluid Body, Pinned Footer)**:
+   * Build the root viewport in `fn ui` using vertical `StripBuilder`:
+     * `Size::exact(64.0)`: Pinned hardware bar (USB PipeWire audio + live SD card status) + 3-column equal-width tab switcher (`StripBuilder::sizes(Size::remainder(), 3)`).
+     * `Size::remainder()`: Fluid active tab viewport (`STREAM HUD`, `SAMPLE CRATE`, `OLED STUDIO`).
+     * `Size::exact(24.0)`: Anchored bottom status guidance and brand footer.
+2. **Rack Card Hierarchy & Anatomy**:
    * Group related controls inside `RolandTheme::rack_card_frame().show(ui, |ui| { ... })`.
-   * Inside every rack card, call `ui.set_width(ui.available_width());` first so cards span the full rack width cleanly without jittering when content changes.
-   * Separate stacked rack cards with `ui.add_space(8.0);`.
-2. **Recessed Display Wells**:
+   * Inside every card, call `ui.set_width(ui.available_width());` first so cards span the full rack width.
+   * Standardized header with hairline divider:
+     ```rust
+     RolandTheme::section_header(ui, "CARD TITLE", |ui| {
+         // Right-aligned status chips or actions
+     });
+     ```
+   * Separate stacked rack cards with `RolandTheme::CARD_GAP` (`8.0px`).
+3. **Aligned 2-Column Control Decks (`RolandTheme::form_grid`)**:
+   * All forms and control rows must use `RolandTheme::form_grid(ui, "unique_id", |ui| { ... })`.
+   * Column 0 is a fixed `90px` uppercase label rendered via `RolandTheme::grid_label(ui, "LABEL")`.
+   * Column 1 spans the remaining width for controls (sliders, comboboxes, buttons). Always end rows with `ui.end_row();`.
+4. **Recessed Display Wells**:
    * Readouts, waveforms, VU meters, and OLED previews must sit inside a recessed well:
      * Background: `RolandTheme::WELL_BG` (`rgb(9, 10, 13)`)
      * Border: `Stroke::new(1.0, RolandTheme::BORDER_SUBTLE)` (`rgb(26, 28, 36)`)
      * Corner Radius: `CornerRadius::same(4)`
-3. **Avoid Nested Scrollbars & Layout Thrashing**:
+5. **Avoid Nested Scrollbars & Layout Thrashing**:
    * Never nest vertical `ScrollArea`s. Only one primary table/list area in a tab should scroll vertically; headers and footers remain fixed.
-   * For multi-column tables, always use `egui_extras::TableBuilder` with explicit `Column::exact(...)` and one `Column::remainder()`.
+   * For multi-column tables, always use `egui_extras::TableBuilder` with explicit `Column::exact(...)` and one `Column::remainder()`. Dynamically budget table scroll height (`(ui.available_height() - reserved).max(...)`).
+   * When listening for keyboard shortcuts (`Space`, `Delete`, `Arrows`), always check `if !ui.ctx().egui_wants_keyboard_input()` to prevent capturing keys while typing in text inputs.
    * Inside `ui.horizontal(...)`, defer mutations (like deleting or reordering items) using an enum action (e.g. `RowAction`) applied *after* the UI closure finishes.
 
 ---

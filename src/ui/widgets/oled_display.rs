@@ -34,11 +34,17 @@ impl<'a> OledDisplayWidget<'a> {
 
     pub fn show(self, ui: &mut Ui) -> Response {
         let avail_w = ui.available_width();
-        // Fit 128x64 cleanly with a 3.0x pixel pitch (384x192) inside the 480px rack card
-        let scale = ((avail_w - 16.0) / OLED_WIDTH as f32).clamp(2.0, 3.2);
+        let avail_h = ui.available_height();
+
+        // Cap scale by both available width and available height (reserving 26px for bezel padding)
+        // so the 2:1 OLED screen never pushes the transport bar off the card.
+        let scale_w = (avail_w - 16.0) / OLED_WIDTH as f32;
+        let scale_h = ((avail_h - 26.0).max(96.0)) / OLED_HEIGHT as f32;
+        let scale = scale_w.min(scale_h).clamp(1.6, 3.2);
+
         let screen_w = OLED_WIDTH as f32 * scale;
         let screen_h = OLED_HEIGHT as f32 * scale;
-        let bezel_h = screen_h + 26.0;
+        let bezel_h = (screen_h + 24.0).max(avail_h.min(screen_h + 36.0));
 
         let (bezel_rect, response) =
             ui.allocate_exact_size(Vec2::new(avail_w, bezel_h), Sense::click());
@@ -79,9 +85,11 @@ impl<'a> OledDisplayWidget<'a> {
             RolandTheme::ACCENT_AMBER,
         );
 
-        // 3. Active 128x64 pixel matrix area centered horizontally
+        // 3. Active 128x64 pixel matrix area centered horizontally & vertically below header
         let screen_left = bezel_rect.center().x - screen_w * 0.5;
-        let screen_top = bezel_rect.top() + 20.0;
+        let content_top = bezel_rect.top() + 18.0;
+        let content_h = (bezel_rect.height() - 22.0).max(screen_h);
+        let screen_top = content_top + (content_h - screen_h) * 0.5;
         let screen_rect = Rect::from_min_size(
             Pos2::new(screen_left, screen_top),
             Vec2::new(screen_w, screen_h),
@@ -105,7 +113,7 @@ impl<'a> OledDisplayWidget<'a> {
                     Rect::from_min_size(Pos2::new(px, py), Vec2::new(dot_size, dot_size));
                 if self.frame.get(x, y) {
                     painter.rect_filled(dot_rect, CornerRadius::ZERO, lit_color);
-                } else if scale >= 2.5 {
+                } else if scale >= 2.2 {
                     painter.rect_filled(dot_rect, CornerRadius::ZERO, unlit_dot);
                 }
             }

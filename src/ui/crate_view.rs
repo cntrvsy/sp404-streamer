@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText, Stroke, Ui, Vec2};
-use egui_extras::{Column, TableBuilder};
+use egui_extras::{Column, Size, StripBuilder, TableBuilder};
 use parking_lot::{Mutex, RwLock};
 use tracing::{error, warn};
 
@@ -121,7 +121,6 @@ impl Default for CrateState {
 impl CrateState {
     /// Rescans for SD cards every 2 seconds or fast-drops disconnected cards
     pub fn refresh_sd_if_needed(&mut self) {
-        // Fast drop if the mount directory vanished (e.g. card physically pulled)
         if let Some(ref sd) = self.detected_sd
             && !sd.mount_path.exists()
         {
@@ -176,7 +175,6 @@ impl CrateState {
     }
 
     fn stage_single_file(&mut self, path: &Path) {
-        // Skip if already staged
         if self.staged_samples.iter().any(|s| s.source_path == path) {
             return;
         }
@@ -210,43 +208,100 @@ fn is_supported_audio_extension(path: &Path) -> bool {
 pub fn render_crate_view(ui: &mut Ui, state: &mut CrateState, preview_player: &PreviewPlayer) {
     state.refresh_sd_if_needed();
 
-    // Request continuous 60 FPS repaint while audio preview is playing so waveform needle glides smoothly
+    // Check if background snapshot completed
+    let finished_backup = {
+        let mut guard = state.backup_status.lock();
+        match &*guard {
+            BackupProgress::Completed {
+                archive_path,
+                size_bytes,
+                file_count,
+            } => {
+                let mb = *size_bytes as f64 / (1024.0 * 1024.0);
+                let msg = format!(
+                    "✓ Saved SD snapshot ({file_count} files, {mb:.1} MB) to {}",
+                    archive_path.display()
+                );
+                *guard = BackupProgress::Idle;
+                Some((msg, false))
+            }
+            BackupProgress::Failed(err) => {
+                let msg = format!("Snapshot error: {err}");
+                *guard = BackupProgress::Idle;
+                Some((msg, true))
+            }
+            _ => None,
+        }
+    };
+    if let Some(status) = finished_backup {
+        state.status_message = Some(status);
+    }
+
     if preview_player.is_playing() {
         ui.ctx().request_repaint();
     }
 
-    // 1. Handle Keyboard Navigation (Spacebar = Audition, Arrows = Select, Ctrl+Arrows = Reorder, Del = Remove, Esc = Clear Filter)
+    // 1. Handle Keyboard Navigation (Guarded against typing in TextEdits!)
     handle_keyboard_shortcuts(ui, state, preview_player);
 
-    ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
+    // Calculate dynamic bottom height for the Export deck
+    let mut bottom_deck_h = 138.0;
+    if state.status_message.is_some() || !state.export_status.lock().is_idle() {
+        bottom_deck_h += 22.0;
+    }
+    if state
+        .detected_sd
+        .as_ref()
+        .map(|sd| sd.is_read_only)
+        .unwrap_or(false)
+    {
+        bottom_deck_h += 16.0;
+    }
 
-    // 2. Top Deck: Hardware SD Card Status & Eject
-    render_sd_card_deck(ui, state);
+    StripBuilder::new(ui)
+        .size(Size::remainder().at_least(180.0))
+        .size(Size::exact(RolandTheme::CARD_GAP))
+        .size(Size::exact(bottom_deck_h))
+        .vertical(|mut strip| {
+            // ================================================================
+            // TOP CARD (Remainder): Staged Samples Table & Waveform Strip
+            // ================================================================
+            strip.cell(|ui| {
+                render_staging_deck(ui, state, preview_player);
+            });
 
-    // 3. Middle Deck: Staged Samples Table & Waveform
-    render_staging_deck(ui, state, preview_player);
+            strip.cell(|_ui| {});
 
-    // 4. Bottom Deck: Export & Conforming Controls
-    render_export_deck(ui, state);
+            // ================================================================
+            // BOTTOM CARD: 2-Column Aligned Conform & SD Export Deck
+            // ================================================================
+            strip.cell(|ui| {
+                render_export_deck(ui, state);
+            });
+        });
 }
 
 fn handle_keyboard_shortcuts(ui: &mut Ui, state: &mut CrateState, preview_player: &PreviewPlayer) {
-    let space_pressed = ui.input(|i| i.key_pressed(egui::Key::Space));
-    let down_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
-    let up_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
     let esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
-    let ctrl_held = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
-    let del_pressed =
-        ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
-
     if esc_pressed && !state.search_filter.is_empty() {
         state.search_filter.clear();
     }
 
+    // Safeguard: Never trigger transport or delete actions when user is typing in a text field
+    if ui.ctx().egui_wants_keyboard_input() {
+        return;
+    }
+
+    let space_pressed = ui.input(|i| i.key_pressed(egui::Key::Space));
+    let down_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+    let up_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+    let ctrl_held = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+    let del_pressed =
+        ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
+
     let n_samples = state.staged_samples.len();
 
     if ctrl_held {
-        // Reordering samples in kit sequence via Ctrl+Up / Ctrl+Down
         if down_pressed
             && let Some(idx) = state.selected_index
             && idx + 1 < n_samples
@@ -262,7 +317,6 @@ fn handle_keyboard_shortcuts(ui: &mut Ui, state: &mut CrateState, preview_player
             state.selected_index = Some(idx - 1);
         }
     } else {
-        // Normal cursor navigation
         if down_pressed && n_samples > 0 {
             preview_player.stop();
             state.selected_index = Some(match state.selected_index {
@@ -303,7 +357,6 @@ fn handle_keyboard_shortcuts(ui: &mut Ui, state: &mut CrateState, preview_player
             let path = sample.source_path.clone();
             let cache = Arc::clone(&state.decoded_cache);
 
-            // Check cache or decode
             let audio = {
                 let read = cache.read();
                 read.get(&path).cloned()
@@ -331,222 +384,147 @@ fn handle_keyboard_shortcuts(ui: &mut Ui, state: &mut CrateState, preview_player
     }
 }
 
-fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
+pub fn render_global_sd_pill(ui: &mut Ui, state: &mut CrateState) {
     let mut eject_mount: Option<(PathBuf, Option<String>)> = None;
     let mut browse_folder: Option<PathBuf> = None;
     let mut mount_candidate_dev: Option<String> = None;
     let mut needs_refresh = false;
     let is_exporting = state.export_status.lock().is_exporting();
 
-    RolandTheme::rack_card_frame().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            if let Some(ref sd) = state.detected_sd {
-                ui.label(
-                    RichText::new("●")
-                        .color(RolandTheme::METER_GREEN)
-                        .size(12.0),
-                );
-                ui.label(
-                    RichText::new(format!("SP-404 SD: {}", sd.label))
-                        .color(RolandTheme::TEXT_PRIMARY)
-                        .strong()
-                        .size(11.0),
-                );
-                ui.label(
-                    RichText::new(format!("({})", sd.free_space_formatted()))
-                        .color(RolandTheme::TEXT_SECONDARY)
-                        .size(11.0),
-                );
-
-                if sd.is_read_only {
-                    ui.label(
-                        RichText::new("[READ-ONLY: CHECK LOCK SWITCH]")
-                            .color(RolandTheme::METER_RED)
-                            .strong()
-                            .monospace()
-                            .size(10.0),
-                    );
-                }
-
-                if ui
-                    .small_button("↻")
-                    .on_hover_text("Rescan SD card status & capacity")
-                    .clicked()
-                {
-                    needs_refresh = true;
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let backup_prog = state.backup_status.lock().clone();
-                    let is_backing_up = backup_prog.is_running();
-
-                    let eject_btn = ui.add_enabled(
-                        !is_exporting && !is_backing_up,
-                        egui::Button::new(
-                            RichText::new("Eject Card")
-                                .color(RolandTheme::TEXT_PRIMARY)
-                                .size(11.0),
-                        ),
-                    );
-                    if is_exporting || is_backing_up {
-                        eject_btn.on_hover_text("Cannot eject while export or snapshot is in progress");
-                    } else if eject_btn.clicked() {
-                        eject_mount = Some((sd.mount_path.clone(), sd.device_node.clone()));
-                    }
-
-                    let snap_label = match backup_prog {
-                        BackupProgress::Running {
-                            files_done,
-                            total_files,
-                            ..
-                        } => {
-                            ui.ctx().request_repaint();
-                            format!("⏳ {files_done}/{total_files}")
-                        }
-                        _ => "📦 Snapshot (.tar.zst)".to_string(),
-                    };
-
-                    if ui
-                        .add_enabled(
-                            !is_exporting && !is_backing_up,
-                            egui::Button::new(
-                                RichText::new(snap_label)
-                                    .color(RolandTheme::ACCENT_AMBER)
-                                    .size(10.5)
-                                    .strong(),
-                            ),
-                        )
-                        .on_hover_text(
-                            "Create a full compressed .tar.zst snapshot of this SD card in ~/Music/SP404-Backups/",
-                        )
-                        .clicked()
-                    {
-                        let sd_root = sd.mount_path.clone();
-                        let dest_path =
-                            default_backup_dir().join(generate_snapshot_filename(&sd.label));
-                        let prog_arc = Arc::clone(&state.backup_status);
-                        let cancel_arc = Arc::clone(&state.backup_cancel_flag);
-                        cancel_arc.store(false, Ordering::Relaxed);
-                        std::thread::spawn(move || {
-                            if let Err(e) =
-                                create_sd_snapshot(&sd_root, &dest_path, &prog_arc, &cancel_arc)
-                            {
-                                *prog_arc.lock() = BackupProgress::Failed(e.to_string());
-                            }
-                        });
-                    }
-                });
-            } else if let Some(unmounted) = state.unmounted_cards.first() {
-                ui.label(
-                    RichText::new("○")
-                        .color(RolandTheme::ACCENT_AMBER)
-                        .size(12.0),
-                );
-                ui.label(
-                    RichText::new(format!(
-                        "CARD DETECTED: {} ({})",
-                        unmounted.device_node, unmounted.label
-                    ))
-                    .color(RolandTheme::ACCENT_AMBER)
+    ui.horizontal(|ui| {
+        if let Some(ref sd) = state.detected_sd {
+            ui.label(RichText::new("●").color(RolandTheme::METER_GREEN).size(9.0));
+            ui.label(
+                RichText::new(format!("SD: {}", sd.label))
+                    .color(RolandTheme::TEXT_PRIMARY)
+                    .strong()
                     .monospace()
-                    .size(10.5),
-                );
+                    .size(9.5),
+            );
+            ui.label(
+                RichText::new(format!("({})", sd.free_space_formatted()))
+                    .color(RolandTheme::TEXT_MUTED)
+                    .size(9.0),
+            );
 
-                if ui
-                    .small_button("↻")
-                    .on_hover_text("Rescan devices")
-                    .clicked()
-                {
-                    needs_refresh = true;
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .button(RichText::new("Browse Directory...").size(11.0))
-                        .clicked()
-                        && let Some(path) = rfd::FileDialog::new().pick_folder()
-                    {
-                        browse_folder = Some(path);
-                    }
-
-                    if ui
-                        .button(
-                            RichText::new("Mount Card")
-                                .color(RolandTheme::ACCENT_ORANGE)
-                                .strong()
-                                .size(11.0),
-                        )
-                        .on_hover_text("Mount this card partition into the system via udisks2")
-                        .clicked()
-                    {
-                        mount_candidate_dev = Some(unmounted.device_node.clone());
-                    }
-                });
-            } else {
+            if sd.is_read_only {
                 ui.label(
-                    RichText::new("○")
-                        .color(Color32::from_rgb(120, 125, 140))
-                        .size(12.0),
+                    RichText::new("[LOCKED]")
+                        .color(RolandTheme::METER_RED)
+                        .strong()
+                        .monospace()
+                        .size(9.0),
                 );
-                ui.label(
-                    RichText::new("NO SD CARD MOUNTED (Insert card or select directory)")
-                        .color(RolandTheme::TEXT_MUTED)
-                        .size(11.0),
-                );
+            }
 
-                if ui
-                    .small_button("↻")
-                    .on_hover_text("Scan for newly plugged-in SD cards")
-                    .clicked()
-                {
-                    needs_refresh = true;
+            let backup_prog = state.backup_status.lock().clone();
+            let is_backing_up = backup_prog.is_running();
+
+            let snap_label = match backup_prog {
+                BackupProgress::Running {
+                    files_done,
+                    total_files,
+                    ..
+                } => {
+                    ui.ctx().request_repaint();
+                    format!("{files_done}/{total_files}")
                 }
+                _ => "📦 Snapshot".to_string(),
+            };
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .button(RichText::new("Browse Directory...").size(11.0))
-                        .clicked()
-                        && let Some(path) = rfd::FileDialog::new().pick_folder()
+            if ui
+                .add_enabled(
+                    !is_exporting && !is_backing_up,
+                    egui::Button::new(
+                        RichText::new(snap_label)
+                            .color(RolandTheme::ACCENT_AMBER)
+                            .size(9.0)
+                            .monospace(),
+                    )
+                    .small(),
+                )
+                .on_hover_text(
+                    "Create a full compressed .tar.zst snapshot in ~/Music/SP404-Backups/",
+                )
+                .clicked()
+            {
+                let sd_root = sd.mount_path.clone();
+                let dest_path = default_backup_dir().join(generate_snapshot_filename(&sd.label));
+                let prog_arc = Arc::clone(&state.backup_status);
+                let cancel_arc = Arc::clone(&state.backup_cancel_flag);
+                cancel_arc.store(false, Ordering::Relaxed);
+                std::thread::spawn(move || {
+                    if let Err(e) = create_sd_snapshot(&sd_root, &dest_path, &prog_arc, &cancel_arc)
                     {
-                        browse_folder = Some(path);
+                        *prog_arc.lock() = BackupProgress::Failed(e.to_string());
                     }
                 });
             }
-        });
+
+            let eject_btn = ui.add_enabled(
+                !is_exporting && !is_backing_up,
+                egui::Button::new(
+                    RichText::new("⏏")
+                        .color(RolandTheme::TEXT_PRIMARY)
+                        .size(9.5),
+                )
+                .small(),
+            );
+            if eject_btn.clicked() {
+                eject_mount = Some((sd.mount_path.clone(), sd.device_node.clone()));
+            }
+        } else if let Some(unmounted) = state.unmounted_cards.first() {
+            ui.label(
+                RichText::new("○")
+                    .color(RolandTheme::ACCENT_AMBER)
+                    .size(9.0),
+            );
+            ui.label(
+                RichText::new(format!("CARD: {}", unmounted.label))
+                    .color(RolandTheme::ACCENT_AMBER)
+                    .monospace()
+                    .size(9.5),
+            );
+
+            if ui
+                .small_button("Mount")
+                .on_hover_text("Mount via udisks2")
+                .clicked()
+            {
+                mount_candidate_dev = Some(unmounted.device_node.clone());
+            }
+
+            if ui.small_button("Browse").clicked()
+                && let Some(path) = rfd::FileDialog::new().pick_folder()
+            {
+                browse_folder = Some(path);
+            }
+        } else {
+            ui.label(
+                RichText::new("○ SD: None")
+                    .color(RolandTheme::TEXT_MUTED)
+                    .monospace()
+                    .size(9.0),
+            );
+
+            if ui.small_button("Browse").clicked()
+                && let Some(path) = rfd::FileDialog::new().pick_folder()
+            {
+                browse_folder = Some(path);
+            }
+        }
+
+        if ui
+            .small_button("↻")
+            .on_hover_text("Rescan SD devices")
+            .clicked()
+        {
+            needs_refresh = true;
+        }
     });
 
     if needs_refresh {
         state.force_refresh_sd();
-    }
-
-    // Check if a background .tar.zst snapshot finished
-    let finished_backup = {
-        let mut guard = state.backup_status.lock();
-        match &*guard {
-            BackupProgress::Completed {
-                archive_path,
-                size_bytes,
-                file_count,
-            } => {
-                let mb = *size_bytes as f64 / (1024.0 * 1024.0);
-                let msg = format!(
-                    "✓ Saved SD snapshot ({file_count} files, {mb:.1} MB) to {}",
-                    archive_path.display()
-                );
-                *guard = BackupProgress::Idle;
-                Some((msg, false))
-            }
-            BackupProgress::Failed(err) => {
-                let msg = format!("Snapshot error: {err}");
-                *guard = BackupProgress::Idle;
-                Some((msg, true))
-            }
-            _ => None,
-        }
-    };
-    if let Some(status) = finished_backup {
-        state.status_message = Some(status);
     }
 
     if let Some(dev) = mount_candidate_dev {
@@ -573,10 +551,7 @@ fn render_sd_card_deck(ui: &mut Ui, state: &mut CrateState) {
         match safe_eject(&mount, dev.as_deref()) {
             Ok(_) => {
                 state.detected_sd = None;
-                state.status_message = Some((
-                    "✓ SD Card safely unmounted. You can unplug it now.".into(),
-                    false,
-                ));
+                state.status_message = Some(("✓ SD Card safely unmounted.".into(), false));
                 state.force_refresh_sd();
             }
             Err(err) => {
@@ -620,523 +595,493 @@ fn open_add_folder_dialog(state: &mut CrateState) {
 }
 
 fn render_staging_deck(ui: &mut Ui, state: &mut CrateState, preview_player: &PreviewPlayer) {
+    let count = state.staged_samples.len();
     RolandTheme::rack_card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        if state.staged_samples.is_empty() {
-            // Header for empty state: minimal and clean
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("STAGED SAMPLES")
-                        .color(RolandTheme::ACCENT_ORANGE)
-                        .strong()
-                        .size(11.0),
-                );
-                ui.label(
-                    RichText::new("(Empty)")
-                        .color(RolandTheme::TEXT_MUTED)
-                        .size(11.0),
-                );
-            });
+        RolandTheme::section_header(ui, "STAGED SAMPLES & AUDITION", |ui| {
+            if count > 0 {
+                if ui
+                    .button(RichText::new("Clear All").size(9.5).color(RolandTheme::METER_RED))
+                    .clicked()
+                {
+                    preview_player.stop();
+                    state.staged_samples.clear();
+                    state.selected_index = None;
+                }
 
-            ui.add_space(6.0);
+                if ui
+                    .button(RichText::new("+ Folder").size(9.5).color(RolandTheme::TEXT_PRIMARY))
+                    .clicked()
+                {
+                    open_add_folder_dialog(state);
+                }
 
-            // Ingestion Bay: The single, dedicated surface for adding samples when empty
-            egui::Frame::new()
-                .fill(Color32::from_rgb(10, 11, 15))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(35, 38, 50)))
-                .corner_radius(4.0)
-                .inner_margin(22.0)
-                .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.label(
-                            RichText::new("STAGE SAMPLES FOR SP-404 CONFORM & EXPORT")
-                                .color(RolandTheme::TEXT_PRIMARY)
-                                .strong()
-                                .size(12.0),
-                        );
-                        ui.add_space(2.0);
-                        ui.label(
-                            RichText::new("Import audio files or folders to audition, normalize, and write to SD")
-                                .color(RolandTheme::TEXT_SECONDARY)
-                                .size(10.5),
-                        );
-                        ui.add_space(6.0);
+                if ui
+                    .button(RichText::new("+ Files").size(9.5).color(RolandTheme::TEXT_PRIMARY))
+                    .clicked()
+                {
+                    open_add_files_dialog(state);
+                }
 
-                        // Supported audio format badges
-                        ui.horizontal(|ui| {
-                            let available = ui.available_width();
-                            ui.add_space(((available - 270.0) / 2.0).max(0.0));
-                            for fmt in &["WAV", "AIFF", "FLAC", "MP3", "OGG", "OPUS"] {
-                                egui::Frame::new()
-                                    .fill(Color32::from_rgb(17, 18, 23))
-                                    .stroke(Stroke::new(1.0, Color32::from_rgb(36, 40, 52)))
-                                    .corner_radius(3.0)
-                                    .inner_margin(egui::Margin::symmetric(5, 2))
-                                    .show(ui, |ui| {
-                                        ui.label(RichText::new(*fmt).color(RolandTheme::TEXT_MUTED).size(9.0).monospace());
-                                    });
-                            }
-                        });
-
-                        ui.add_space(14.0);
-
-                        // Exclusive Ingestion Actions: The only place import buttons appear when empty
-                        ui.horizontal(|ui| {
-                            let available = ui.available_width();
-                            ui.add_space(((available - 240.0) / 2.0).max(0.0));
-                            if ui
-                                .button(RichText::new("+ Select Audio Files...").strong().size(11.0).color(RolandTheme::TEXT_PRIMARY))
-                                .on_hover_text("Select audio files (Hold Ctrl or Shift to select multiple)")
-                                .clicked()
-                            {
-                                open_add_files_dialog(state);
-                            }
-                            if ui
-                                .button(RichText::new("+ Select Folder...").strong().size(11.0).color(RolandTheme::TEXT_PRIMARY))
-                                .on_hover_text("Import all audio files from a sample pack directory recursively")
-                                .clicked()
-                            {
-                                open_add_folder_dialog(state);
-                            }
-                        });
-
-                        ui.add_space(10.0);
-                        ui.label(
-                            RichText::new("Hold Ctrl or Shift in the file chooser to select multiple files at once.")
-                                .color(RolandTheme::TEXT_MUTED)
-                                .size(9.5),
-                        );
-                    });
-                });
-        } else {
-            // Header / Toolbar: Only shown when samples are staged
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new("STAGED SAMPLES")
-                        .color(RolandTheme::ACCENT_ORANGE)
-                        .strong()
-                        .size(11.0),
-                );
-                ui.label(
-                    RichText::new(format!("({} items)", state.staged_samples.len()))
-                        .color(RolandTheme::TEXT_SECONDARY)
-                        .size(11.0),
-                );
-
-                ui.add_space(8.0);
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_filter)
-                        .hint_text("Filter samples...")
-                        .desired_width(110.0),
+                        .hint_text("Filter...")
+                        .desired_width(75.0),
                 );
-                if !state.search_filter.is_empty()
-                    && ui
-                        .button(RichText::new("×").size(10.0))
-                        .on_hover_text("Clear filter (Esc)")
-                        .clicked()
-                {
-                    state.search_filter.clear();
-                }
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .button(RichText::new("Clear All").size(10.0).color(RolandTheme::METER_RED))
-                        .clicked()
-                    {
-                        preview_player.stop();
-                        state.staged_samples.clear();
-                        state.selected_index = None;
-                    }
+                ui.label(
+                    RichText::new(format!("({count})"))
+                        .color(RolandTheme::TEXT_MUTED)
+                        .monospace()
+                        .size(9.5),
+                );
+            }
+        });
+            if state.staged_samples.is_empty() {
+                // Ingestion Bay Empty State
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(10, 11, 15))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(35, 38, 50)))
+                    .corner_radius(4.0)
+                    .inner_margin(16.0)
+                    .show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                RichText::new("STAGE SAMPLES FOR SP-404 CONFORM & EXPORT")
+                                    .color(RolandTheme::TEXT_PRIMARY)
+                                    .strong()
+                                    .size(11.5),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new(
+                                    "Import audio files or folders to audition, normalize, and write to SD",
+                                )
+                                .color(RolandTheme::TEXT_SECONDARY)
+                                .size(10.0),
+                            );
+                            ui.add_space(8.0);
 
-                    if ui
-                        .button(RichText::new("+ Folder").size(10.0).color(RolandTheme::TEXT_PRIMARY))
-                        .on_hover_text("Import all audio files from a directory (recursively)")
-                        .clicked()
-                    {
-                        open_add_folder_dialog(state);
-                    }
-
-                    if ui
-                        .button(RichText::new("+ Files").size(10.0).color(RolandTheme::TEXT_PRIMARY))
-                        .on_hover_text("Select multiple audio files (Ctrl/Shift+Click supported)")
-                        .clicked()
-                    {
-                        open_add_files_dialog(state);
-                    }
-
-                    ui.label(
-                        RichText::new("Space: Audition | Del: Remove")
-                            .color(RolandTheme::TEXT_MUTED)
-                            .size(10.0),
-                    );
-                });
-            });
-
-            ui.add_space(4.0);
-            let filter_lower = state.search_filter.trim().to_lowercase();
-            let is_filtering = !filter_lower.is_empty();
-            let n_samples = state.staged_samples.len();
-
-            let mut action = CrateRowAction::None;
-            let selected = state.selected_index;
-
-            ui.scope(|ui| {
-                ui.visuals_mut().selection.bg_fill = Color32::from_rgb(26, 32, 46);
-                ui.visuals_mut().selection.stroke = Stroke::new(1.0, Color32::from_rgb(52, 64, 88));
-
-                TableBuilder::new(ui)
-                    .striped(false)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .max_scroll_height(200.0)
-                    .sense(egui::Sense::click())
-                    .column(Column::exact(26.0))            // # (Pad index)
-                    .column(Column::exact(22.0))            // Reorder (↕)
-                    .column(Column::remainder().clip(true)) // Sample name & play icon
-                    .column(Column::exact(56.0))            // Format (MONO/STEREO)
-                    .column(Column::exact(46.0))            // Duration (0:02)
-                    .column(Column::exact(22.0))            // Remove (×)
-                    .header(20.0, |mut header| {
-                        header.col(|ui| {
-                            ui.label(RichText::new("#").color(RolandTheme::TEXT_MUTED).size(9.5).monospace());
-                        });
-                        header.col(|ui| {
-                            ui.label(RichText::new("↕").color(RolandTheme::TEXT_MUTED).size(9.5).monospace())
-                                .on_hover_text("Reorder pad position (Left-click: Up ▲ | Right-click: Down ▼)");
-                        });
-                        header.col(|ui| {
-                            ui.label(RichText::new("SAMPLE NAME").color(RolandTheme::TEXT_MUTED).size(9.5).strong());
-                            if is_filtering {
-                                let matched_count = state
-                                    .staged_samples
-                                    .iter()
-                                    .filter(|s| s.clean_name.to_lowercase().contains(&filter_lower))
-                                    .count();
-                                ui.label(
-                                    RichText::new(format!("({matched_count} matched)"))
-                                        .color(RolandTheme::ACCENT_AMBER)
-                                        .size(9.5),
-                                );
-                            }
-                        });
-                        header.col(|ui| {
-                            ui.label(RichText::new("FORMAT").color(RolandTheme::TEXT_MUTED).size(9.5).monospace());
-                        });
-                        header.col(|ui| {
-                            ui.label(RichText::new("LENGTH").color(RolandTheme::TEXT_MUTED).size(9.5).monospace());
-                        });
-                        header.col(|_ui| {});
-                    })
-                    .body(|mut body| {
-                        for (idx, sample) in state.staged_samples.iter().enumerate() {
-                            if is_filtering && !sample.clean_name.to_lowercase().contains(&filter_lower) {
-                                continue;
-                            }
-
-                            let is_curr = selected == Some(idx);
-                            body.row(22.0, |mut row| {
-                                row.set_selected(is_curr);
-
-                                // Col 1: Index
-                                row.col(|ui| {
-                                    ui.label(
-                                        RichText::new(format!("{:02}", idx + 1))
-                                            .color(if is_curr { RolandTheme::ACCENT_ORANGE } else { RolandTheme::TEXT_MUTED })
-                                            .monospace()
-                                            .size(10.0),
-                                    );
-                                });
-
-                                // Col 2: Single Reorder button (Left-click: Up, Right-click: Down)
-                                row.col(|ui| {
-                                    let reorder_btn = egui::Button::new(RichText::new("↕").size(9.5)).small();
-                                    let resp = ui
-                                        .add_enabled(n_samples > 1, reorder_btn)
-                                        .on_hover_text(format!(
-                                            "Pad #{:02} Order:\n• Left-click: Move Up ▲ (Ctrl+Up)\n• Right-click: Move Down ▼ (Ctrl+Down)",
-                                            idx + 1
-                                        ));
-
-                                    if resp.clicked() {
-                                        if idx > 0 {
-                                            action = CrateRowAction::MoveUp(idx);
-                                        }
-                                    } else if resp.secondary_clicked() && idx + 1 < n_samples {
-                                        action = CrateRowAction::MoveDown(idx);
-                                    }
-                                });
-
-                                // Col 3: Sample Name (with play indicator)
-                                row.col(|ui| {
-                                    if is_curr && preview_player.is_playing() {
-                                        ui.label(RichText::new("▶").color(RolandTheme::ACCENT_ORANGE).size(10.0));
-                                    }
-                                    ui.label(
-                                        RichText::new(&sample.clean_name)
-                                            .color(if is_curr { Color32::WHITE } else { RolandTheme::TEXT_PRIMARY })
-                                            .size(11.0),
-                                    );
-                                });
-
-                                // Col 4: Format
-                                row.col(|ui| {
-                                    let (chan_text, chan_color) = if sample.is_mono {
-                                        ("MONO", RolandTheme::METER_GREEN)
-                                    } else {
-                                        ("STEREO", Color32::from_rgb(0, 180, 216))
-                                    };
-                                    ui.label(
-                                        RichText::new(chan_text)
-                                            .color(chan_color)
-                                            .size(9.0)
-                                            .monospace(),
-                                    );
-                                });
-
-                                // Col 5: Duration
-                                row.col(|ui| {
-                                    ui.label(
-                                        RichText::new(sample.duration_formatted())
-                                            .color(RolandTheme::TEXT_SECONDARY)
-                                            .size(10.0),
-                                    );
-                                });
-
-                                // Col 6: Remove
-                                row.col(|ui| {
-                                    if ui
-                                        .button(RichText::new("×").color(RolandTheme::TEXT_MUTED).size(11.0))
-                                        .on_hover_text("Remove from crate")
-                                        .clicked()
-                                    {
-                                        action = CrateRowAction::Remove(idx);
-                                    }
-                                });
-
-                                if row.response().clicked() && state.selected_index != Some(idx) {
-                                    action = CrateRowAction::Select(idx);
+                            ui.horizontal(|ui| {
+                                let available = ui.available_width();
+                                ui.add_space(((available - 240.0) / 2.0).max(0.0));
+                                if ui
+                                    .button(
+                                        RichText::new("+ Select Audio Files...")
+                                            .strong()
+                                            .size(10.5)
+                                            .color(RolandTheme::TEXT_PRIMARY),
+                                    )
+                                    .clicked()
+                                {
+                                    open_add_files_dialog(state);
+                                }
+                                if ui
+                                    .button(
+                                        RichText::new("+ Select Folder...")
+                                            .strong()
+                                            .size(10.5)
+                                            .color(RolandTheme::TEXT_PRIMARY),
+                                    )
+                                    .clicked()
+                                {
+                                    open_add_folder_dialog(state);
                                 }
                             });
-                        }
+                        });
                     });
-            });
-
-            match action {
-                CrateRowAction::Select(idx) => {
-                    preview_player.stop();
-                    state.selected_index = Some(idx);
-                }
-                CrateRowAction::MoveUp(idx) if idx > 0 => {
-                    state.staged_samples.swap(idx, idx - 1);
-                    state.selected_index = Some(idx - 1);
-                }
-                CrateRowAction::MoveDown(idx) if idx + 1 < state.staged_samples.len() => {
-                    state.staged_samples.swap(idx, idx + 1);
-                    state.selected_index = Some(idx + 1);
-                }
-                CrateRowAction::Remove(idx) => {
-                    preview_player.stop();
-                    state.staged_samples.remove(idx);
-                    if state.staged_samples.is_empty() {
-                        state.selected_index = None;
-                    } else if let Some(curr) = state.selected_index {
-                        state.selected_index = Some(curr.min(state.staged_samples.len() - 1));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        ui.add_space(4.0);
-
-        // Active Sample Waveform Strip with live playhead, scrubbing, and Auto-Chop Slicer
-        if let Some(idx) = state.selected_index
-            && let Some(sample) = state.staged_samples.get(idx).cloned()
-        {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!("SELECTED: {}.wav", sample.clean_name))
-                        .color(RolandTheme::TEXT_PRIMARY)
-                        .size(10.0)
-                        .strong(),
-                );
-                ui.label(
-                    RichText::new(format!(
-                        "Peak: {} | {}",
-                        sample.peak_db_formatted(),
-                        sample.duration_formatted()
-                    ))
-                    .color(RolandTheme::TEXT_SECONDARY)
-                    .size(10.0),
-                );
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .selectable_label(
-                            state.auto_chop_enabled,
-                            RichText::new("✂ Auto-Chop")
-                                .size(9.5)
-                                .color(if state.auto_chop_enabled {
-                                    RolandTheme::TEXT_ON_ACCENT
-                                } else {
-                                    RolandTheme::ACCENT_CYAN
-                                })
-                                .strong(),
-                        )
-                        .on_hover_text(
-                            "Slice loop into numbered individual WAV files (01_..16_) for SP-404 pad import",
-                        )
-                        .clicked()
-                    {
-                        state.auto_chop_enabled = !state.auto_chop_enabled;
-                    }
-                });
-            });
-
-            // Decode audio into cache if needed for scrub or auto-chop
-            let ensure_decoded = |path: &Path, cache: &Arc<RwLock<HashMap<PathBuf, DecodedAudio>>>| {
-                if let Some(cached) = cache.read().get(path).cloned() {
-                    return Some(cached);
-                }
-                match decode_audio_file(path) {
-                    Ok(decoded) => {
-                        cache.write().insert(path.to_path_buf(), decoded.clone());
-                        Some(decoded)
-                    }
-                    Err(e) => {
-                        error!("Failed to decode sample: {e}");
-                        None
-                    }
-                }
-            };
-
-            let (slice_frames, slice_ratios) = if state.auto_chop_enabled
-                && let Some(decoded) = ensure_decoded(&sample.source_path, &state.decoded_cache)
-            {
-                let mode = if state.chop_even_grid {
-                    ChopMode::EvenGrid
-                } else {
-                    ChopMode::Transient {
-                        sensitivity: state.chop_sensitivity,
-                    }
-                };
-                let frames = compute_slice_frames(&decoded, state.chop_slice_count, mode);
-                let ratios = slice_frames_to_ratios(&decoded, &frames);
-                (frames, ratios)
             } else {
-                (Vec::new(), Vec::new())
-            };
+                let filter_lower = state.search_filter.trim().to_lowercase();
+                let is_filtering = !filter_lower.is_empty();
+                let n_samples = state.staged_samples.len();
 
-            let is_playing = preview_player.is_playing();
-            let progress = preview_player.progress();
-            let (_resp, seek_ratio) = WaveformView::new(
-                &sample.waveform_overview,
-                is_playing,
-                progress,
-            )
-            .slice_markers(&slice_ratios)
-            .show(ui);
+                let mut action = CrateRowAction::None;
+                let selected = state.selected_index;
 
-            if let Some(ratio) = seek_ratio
-                && let Some(audio_to_play) =
-                    ensure_decoded(&sample.source_path, &state.decoded_cache)
-                && !audio_to_play.samples.is_empty()
-                && !audio_to_play.samples[0].is_empty()
-            {
-                preview_player.play_at(audio_to_play, ratio);
-            }
+                // Dynamically budget table scroll height based on whether a waveform/chop bar is docked
+                let reserved_bottom = if selected.is_some() {
+                    if state.auto_chop_enabled { 110.0 } else { 82.0 }
+                } else {
+                    0.0
+                };
+                let table_h = (ui.available_height() - reserved_bottom).max(80.0);
 
-            if state.auto_chop_enabled {
-                ui.add_space(3.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("SLICES:")
-                            .size(9.0)
-                            .color(RolandTheme::ACCENT_CYAN)
-                            .monospace()
-                            .strong(),
-                    );
-                    for &cnt in &[4usize, 8, 12, 16] {
-                        if ui
-                            .selectable_label(
-                                state.chop_slice_count == cnt,
-                                RichText::new(format!("{cnt}")).size(9.5).monospace(),
-                            )
-                            .clicked()
-                        {
-                            state.chop_slice_count = cnt;
+                ui.scope(|ui| {
+                    ui.visuals_mut().selection.bg_fill = Color32::from_rgb(26, 32, 46);
+                    ui.visuals_mut().selection.stroke =
+                        Stroke::new(1.0, Color32::from_rgb(52, 64, 88));
+
+                    TableBuilder::new(ui)
+                        .striped(false)
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .max_scroll_height(table_h)
+                        .sense(egui::Sense::click())
+                        .column(Column::exact(24.0))            // # (Pad index)
+                        .column(Column::exact(20.0))            // Reorder (↕)
+                        .column(Column::remainder().clip(true)) // Sample name & play icon
+                        .column(Column::exact(52.0))            // Format (MONO/STEREO)
+                        .column(Column::exact(44.0))            // Duration (0:02)
+                        .column(Column::exact(20.0))            // Remove (×)
+                        .header(18.0, |mut header| {
+                            header.col(|ui| {
+                                ui.label(
+                                    RichText::new("#")
+                                        .color(RolandTheme::TEXT_MUTED)
+                                        .size(9.0)
+                                        .monospace(),
+                                );
+                            });
+                            header.col(|ui| {
+                                ui.label(
+                                    RichText::new("↕")
+                                        .color(RolandTheme::TEXT_MUTED)
+                                        .size(9.0)
+                                        .monospace(),
+                                );
+                            });
+                            header.col(|ui| {
+                                ui.label(
+                                    RichText::new("SAMPLE NAME")
+                                        .color(RolandTheme::TEXT_MUTED)
+                                        .size(9.0)
+                                        .strong(),
+                                );
+                            });
+                            header.col(|ui| {
+                                ui.label(
+                                    RichText::new("FORMAT")
+                                        .color(RolandTheme::TEXT_MUTED)
+                                        .size(9.0)
+                                        .monospace(),
+                                );
+                            });
+                            header.col(|ui| {
+                                ui.label(
+                                    RichText::new("LENGTH")
+                                        .color(RolandTheme::TEXT_MUTED)
+                                        .size(9.0)
+                                        .monospace(),
+                                );
+                            });
+                            header.col(|_ui| {});
+                        })
+                        .body(|mut body| {
+                            for (idx, sample) in state.staged_samples.iter().enumerate() {
+                                if is_filtering
+                                    && !sample.clean_name.to_lowercase().contains(&filter_lower)
+                                {
+                                    continue;
+                                }
+
+                                let is_curr = selected == Some(idx);
+                                body.row(20.0, |mut row| {
+                                    row.set_selected(is_curr);
+
+                                    row.col(|ui| {
+                                        ui.label(
+                                            RichText::new(format!("{:02}", idx + 1))
+                                                .color(if is_curr {
+                                                    RolandTheme::ACCENT_ORANGE
+                                                } else {
+                                                    RolandTheme::TEXT_MUTED
+                                                })
+                                                .monospace()
+                                                .size(9.5),
+                                        );
+                                    });
+
+                                    row.col(|ui| {
+                                        let reorder_btn = egui::Button::new(
+                                            RichText::new("↕").size(9.0),
+                                        )
+                                        .small();
+                                        let resp = ui.add_enabled(n_samples > 1, reorder_btn);
+                                        if resp.clicked() && idx > 0 {
+                                            action = CrateRowAction::MoveUp(idx);
+                                        } else if resp.secondary_clicked() && idx + 1 < n_samples {
+                                            action = CrateRowAction::MoveDown(idx);
+                                        }
+                                    });
+
+                                    row.col(|ui| {
+                                        if is_curr && preview_player.is_playing() {
+                                            ui.label(
+                                                RichText::new("▶")
+                                                    .color(RolandTheme::ACCENT_ORANGE)
+                                                    .size(9.5),
+                                            );
+                                        }
+                                        ui.label(
+                                            RichText::new(&sample.clean_name)
+                                                .color(if is_curr {
+                                                    Color32::WHITE
+                                                } else {
+                                                    RolandTheme::TEXT_PRIMARY
+                                                })
+                                                .size(10.5),
+                                        );
+                                    });
+
+                                    row.col(|ui| {
+                                        let (chan_text, chan_color) = if sample.is_mono {
+                                            ("MONO", RolandTheme::METER_GREEN)
+                                        } else {
+                                            ("STEREO", Color32::from_rgb(0, 180, 216))
+                                        };
+                                        ui.label(
+                                            RichText::new(chan_text)
+                                                .color(chan_color)
+                                                .size(8.5)
+                                                .monospace(),
+                                        );
+                                    });
+
+                                    row.col(|ui| {
+                                        ui.label(
+                                            RichText::new(sample.duration_formatted())
+                                                .color(RolandTheme::TEXT_SECONDARY)
+                                                .size(9.5),
+                                        );
+                                    });
+
+                                    row.col(|ui| {
+                                        if ui
+                                            .button(
+                                                RichText::new("×")
+                                                    .color(RolandTheme::TEXT_MUTED)
+                                                    .size(10.0),
+                                            )
+                                            .clicked()
+                                        {
+                                            action = CrateRowAction::Remove(idx);
+                                        }
+                                    });
+
+                                    if row.response().clicked() && state.selected_index != Some(idx)
+                                    {
+                                        action = CrateRowAction::Select(idx);
+                                    }
+                                });
+                            }
+                        });
+                });
+
+                match action {
+                    CrateRowAction::Select(idx) => {
+                        preview_player.stop();
+                        state.selected_index = Some(idx);
+                    }
+                    CrateRowAction::MoveUp(idx) if idx > 0 => {
+                        state.staged_samples.swap(idx, idx - 1);
+                        state.selected_index = Some(idx - 1);
+                    }
+                    CrateRowAction::MoveDown(idx) if idx + 1 < state.staged_samples.len() => {
+                        state.staged_samples.swap(idx, idx + 1);
+                        state.selected_index = Some(idx + 1);
+                    }
+                    CrateRowAction::Remove(idx) => {
+                        preview_player.stop();
+                        state.staged_samples.remove(idx);
+                        if state.staged_samples.is_empty() {
+                            state.selected_index = None;
+                        } else if let Some(curr) = state.selected_index {
+                            state.selected_index = Some(curr.min(state.staged_samples.len() - 1));
                         }
                     }
+                    _ => {}
+                }
 
-                    ui.checkbox(
-                        &mut state.chop_even_grid,
-                        RichText::new("Even Grid").size(9.5),
-                    )
-                    .on_hover_text("Switch between transient onset detection and equal-length grid slices");
-
-                    if !state.chop_even_grid {
-                        ui.add(
-                            egui::Slider::new(&mut state.chop_sensitivity, 0.1..=0.95)
-                                .text("Sens")
-                                .show_value(false)
-                                .trailing_fill(true),
+                // Docked Waveform Strip & Auto-Chop
+                if let Some(idx) = state.selected_index
+                    && let Some(sample) = state.staged_samples.get(idx).cloned()
+                {
+                    ui.add_space(3.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("SELECTED: {}.wav", sample.clean_name))
+                                .color(RolandTheme::TEXT_PRIMARY)
+                                .size(9.5)
+                                .strong(),
                         );
-                    }
+                        ui.label(
+                            RichText::new(format!(
+                                "{} | {}",
+                                sample.peak_db_formatted(),
+                                sample.duration_formatted()
+                            ))
+                            .color(RolandTheme::TEXT_MUTED)
+                            .size(9.0),
+                        );
 
-                    let can_chop_sd = state
-                        .detected_sd
-                        .as_ref()
-                        .is_some_and(|sd| !sd.is_read_only);
-                    if ui
-                        .add_enabled(
-                            can_chop_sd,
-                            egui::Button::new(
-                                RichText::new(format!("⚡ Export {} Slices", slice_frames.len()))
-                                    .size(9.5)
-                                    .color(if can_chop_sd {
-                                        RolandTheme::ACCENT_ORANGE
-                                    } else {
-                                        RolandTheme::TEXT_MUTED
-                                    })
-                                    .strong(),
-                            ),
-                        )
-                        .on_hover_text(
-                            "Exports numbered 16-bit/48kHz WAV slices (01_..16_) into IMPORT/<Kit_Name>/.\n\
-                             Assign them to pads on the SP-404MKII via SHIFT + PAD 14 → IMPORT → SAMPLE.",
-                        )
-                        .clicked()
-                        && let Some(ref sd) = state.detected_sd
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .selectable_label(
+                                    state.auto_chop_enabled,
+                                    RichText::new("✂ Auto-Chop")
+                                        .size(9.0)
+                                        .color(if state.auto_chop_enabled {
+                                            RolandTheme::TEXT_ON_ACCENT
+                                        } else {
+                                            RolandTheme::ACCENT_CYAN
+                                        })
+                                        .strong(),
+                                )
+                                .on_hover_text(
+                                    "Slice loop into numbered WAV files (01_..16_) for SP-404 pads",
+                                )
+                                .clicked()
+                            {
+                                state.auto_chop_enabled = !state.auto_chop_enabled;
+                            }
+                        });
+                    });
+
+                    let ensure_decoded = |path: &Path,
+                                          cache: &Arc<RwLock<HashMap<PathBuf, DecodedAudio>>>| {
+                        if let Some(cached) = cache.read().get(path).cloned() {
+                            return Some(cached);
+                        }
+                        match decode_audio_file(path) {
+                            Ok(decoded) => {
+                                cache.write().insert(path.to_path_buf(), decoded.clone());
+                                Some(decoded)
+                            }
+                            Err(e) => {
+                                error!("Failed to decode sample: {e}");
+                                None
+                            }
+                        }
+                    };
+
+                    let (slice_frames, slice_ratios) = if state.auto_chop_enabled
                         && let Some(decoded) =
                             ensure_decoded(&sample.source_path, &state.decoded_cache)
                     {
-                        let dest_dir = sd.import_path.join(&state.target_folder_name);
-                        match export_chopped_slices(
-                            &decoded,
-                            &slice_frames,
-                            &sample.clean_name,
-                            &dest_dir,
-                            &state.options,
-                        ) {
-                            Ok(written) => {
-                                state.status_message = Some((
-                                    format!(
-                                        "✓ Exported {} slices to {}/ (Use SHIFT+PAD 14 on SP-404 to assign)",
-                                        written.len(),
-                                        state.target_folder_name
-                                    ),
-                                    false,
-                                ));
+                        let mode = if state.chop_even_grid {
+                            ChopMode::EvenGrid
+                        } else {
+                            ChopMode::Transient {
+                                sensitivity: state.chop_sensitivity,
                             }
-                            Err(e) => {
-                                state.status_message =
-                                    Some((format!("Auto-chop export error: {e}"), true));
-                            }
-                        }
+                        };
+                        let frames = compute_slice_frames(&decoded, state.chop_slice_count, mode);
+                        let ratios = slice_frames_to_ratios(&decoded, &frames);
+                        (frames, ratios)
+                    } else {
+                        (Vec::new(), Vec::new())
+                    };
+
+                    let is_playing = preview_player.is_playing();
+                    let progress = preview_player.progress();
+                    let (_resp, seek_ratio) = WaveformView::new(
+                        &sample.waveform_overview,
+                        is_playing,
+                        progress,
+                    )
+                    .slice_markers(&slice_ratios)
+                    .show(ui);
+
+                    if let Some(ratio) = seek_ratio
+                        && let Some(audio_to_play) =
+                            ensure_decoded(&sample.source_path, &state.decoded_cache)
+                        && !audio_to_play.samples.is_empty()
+                        && !audio_to_play.samples[0].is_empty()
+                    {
+                        preview_player.play_at(audio_to_play, ratio);
                     }
-                });
+
+                    if state.auto_chop_enabled {
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("SLICES:")
+                                    .size(9.0)
+                                    .color(RolandTheme::ACCENT_CYAN)
+                                    .monospace()
+                                    .strong(),
+                            );
+                            for &cnt in &[4usize, 8, 12, 16] {
+                                if ui
+                                    .selectable_label(
+                                        state.chop_slice_count == cnt,
+                                        RichText::new(format!("{cnt}")).size(9.0).monospace(),
+                                    )
+                                    .clicked()
+                                {
+                                    state.chop_slice_count = cnt;
+                                }
+                            }
+
+                            ui.checkbox(
+                                &mut state.chop_even_grid,
+                                RichText::new("Even Grid").size(9.0),
+                            );
+
+                            if !state.chop_even_grid {
+                                ui.spacing_mut().slider_width = 50.0;
+                                ui.add(
+                                    egui::Slider::new(&mut state.chop_sensitivity, 0.1..=0.95)
+                                        .show_value(false)
+                                        .trailing_fill(true),
+                                );
+                            }
+
+                            let can_chop_sd = state
+                                .detected_sd
+                                .as_ref()
+                                .is_some_and(|sd| !sd.is_read_only);
+                            if ui
+                                .add_enabled(
+                                    can_chop_sd,
+                                    egui::Button::new(
+                                        RichText::new(format!(
+                                            "⚡ Export {} Slices",
+                                            slice_frames.len()
+                                        ))
+                                        .size(9.0)
+                                        .color(if can_chop_sd {
+                                            RolandTheme::ACCENT_ORANGE
+                                        } else {
+                                            RolandTheme::TEXT_MUTED
+                                        })
+                                        .strong(),
+                                    )
+                                    .small(),
+                                )
+                                .clicked()
+                                && let Some(ref sd) = state.detected_sd
+                                && let Some(decoded) =
+                                    ensure_decoded(&sample.source_path, &state.decoded_cache)
+                            {
+                                let dest_dir = sd.import_path.join(&state.target_folder_name);
+                                match export_chopped_slices(
+                                    &decoded,
+                                    &slice_frames,
+                                    &sample.clean_name,
+                                    &dest_dir,
+                                    &state.options,
+                                ) {
+                                    Ok(written) => {
+                                        state.status_message = Some((
+                                            format!(
+                                                "✓ Exported {} slices to {}/",
+                                                written.len(),
+                                                state.target_folder_name
+                                            ),
+                                            false,
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        state.status_message =
+                                            Some((format!("Auto-chop export error: {e}"), true));
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
             }
-        }
-    });
+        });
 }
 
 fn render_export_deck(ui: &mut Ui, state: &mut CrateState) {
@@ -1148,10 +1093,15 @@ fn render_export_deck(ui: &mut Ui, state: &mut CrateState) {
             true,
             sd.is_read_only,
             sd.free_bytes,
-            format!("Target: {}/", sd.relative_import_path()),
+            format!("IMPORT/{}/", state.target_folder_name),
         )
     } else {
-        (false, false, 0, "Target Folder: IMPORT/".to_string())
+        (
+            false,
+            false,
+            0,
+            format!("IMPORT/{}/", state.target_folder_name),
+        )
     };
 
     let total_duration: f32 = state.staged_samples.iter().map(|s| s.duration_secs).sum();
@@ -1168,98 +1118,78 @@ fn render_export_deck(ui: &mut Ui, state: &mut CrateState) {
 
     RolandTheme::rack_card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
-        // Target folder row & Duplicate warning
-        let is_duplicate = state
-            .detected_sd
-            .as_ref()
-            .map(|sd| sd.existing_kits.contains(&state.target_folder_name))
-            .unwrap_or(false);
-
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(&target_prefix_label).color(RolandTheme::TEXT_PRIMARY).size(11.0));
-            let avail_for_edit = if is_duplicate {
-                (ui.available_width() - 175.0).max(120.0)
-            } else {
-                ui.available_width().max(140.0)
-            };
-            ui.add_enabled(
-                !is_exporting,
-                egui::TextEdit::singleline(&mut state.target_folder_name)
-                    .desired_width(avail_for_edit),
+        RolandTheme::section_header(ui, "CONFORM & SD EXPORT (16-BIT / 48kHz WAV)", |ui| {
+            ui.label(
+                RichText::new(&target_prefix_label)
+                    .size(9.5)
+                    .color(RolandTheme::TEXT_MUTED)
+                    .monospace(),
             );
-
-            if is_duplicate {
-                ui.label(
-                    RichText::new("[Directory exists on card]")
-                        .color(RolandTheme::ACCENT_AMBER)
-                        .monospace()
-                        .size(10.0),
-                );
-            }
         });
 
-        ui.add_space(2.0);
-
-        ui.vertical(|ui| {
+        RolandTheme::form_grid(ui, "crate_export_grid", |ui| {
+            // Row 1: Target Kit
+            RolandTheme::grid_label(ui, "TARGET KIT");
             ui.horizontal(|ui| {
                 ui.add_enabled(
                     !is_exporting,
-                    egui::Checkbox::new(&mut state.options.normalize_peak, "Peak Normalize (-0.5 dBFS)"),
-                )
-                .on_hover_text("Brings the loudest peak in each sample to -0.5 dBFS so kits have consistent volume.");
-
-                let pad_cb = ui.add_enabled(
-                    !is_exporting,
-                    egui::Checkbox::new(&mut state.options.pad_numbered, "Prefix 01-16 (Pad order)"),
+                    egui::TextEdit::singleline(&mut state.target_folder_name).desired_width(120.0),
                 );
-                pad_cb.on_hover_ui(|ui| {
-                    ui.set_max_width(300.0);
-                    ui.label(
-                        RichText::new("Prefix 01-16 (Pad Order)")
-                            .strong()
-                            .color(RolandTheme::ACCENT_ORANGE),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("• ON (Recommended for Kits):\n  Names files 01_Kick, 02_Snare... Since the SP-404 sorts alphabetically, this loads files straight onto Pad 1 through Pad 16 in exact order.\n\n• OFF (Sample Libraries):\n  Preserves original sample names without numbers for general library browsing.")
-                            .size(10.5),
-                    );
-                });
-            });
 
+                let is_duplicate = state
+                    .detected_sd
+                    .as_ref()
+                    .map(|sd| sd.existing_kits.contains(&state.target_folder_name))
+                    .unwrap_or(false);
+
+                if is_duplicate {
+                    ui.label(
+                        RichText::new("[Folder Exists]")
+                            .color(RolandTheme::ACCENT_AMBER)
+                            .monospace()
+                            .size(9.5),
+                    );
+                }
+            });
+            ui.end_row();
+
+            // Row 2: DSP Options
+            RolandTheme::grid_label(ui, "AUDIO DSP");
             ui.horizontal(|ui| {
                 ui.add_enabled(
                     !is_exporting,
-                    egui::Checkbox::new(&mut state.options.trim_start_silence, "Trim Start Silence"),
-                )
-                .on_hover_text(
-                    "Strips leading digital silence (< -60 dBFS) down to 0.5ms before the attack transient so pads trigger with zero lag.",
+                    egui::Checkbox::new(&mut state.options.normalize_peak, "Normalize (-0.5dB)"),
                 );
-
                 ui.add_enabled(
                     !is_exporting,
-                    egui::Checkbox::new(&mut state.options.micro_fades, "De-Click Fades"),
-                )
-                .on_hover_text(
-                    "Applies a 1.5ms fade-in and 3.0ms fade-out to prevent DC-offset clicks and truncation pops.",
+                    egui::Checkbox::new(&mut state.options.trim_start_silence, "Trim Silence"),
                 );
-
                 ui.add_enabled(
                     !is_exporting,
-                    egui::Checkbox::new(&mut state.options.tpdf_dither, "16-Bit TPDF Dither"),
-                )
-                .on_hover_text(
-                    "Applies Triangular Probability Density Function dithering when quantizing 24/32-bit studio files to 16-bit PCM.",
+                    egui::Checkbox::new(&mut state.options.micro_fades, "De-Click"),
+                );
+                ui.add_enabled(
+                    !is_exporting,
+                    egui::Checkbox::new(&mut state.options.tpdf_dither, "TPDF Dither"),
                 );
             });
+            ui.end_row();
 
-            // Live explanatory microcopy below checkboxes
-            let hint_text = if state.options.pad_numbered {
-                "Prefix 01-16 enabled: Files will be numbered to map sequentially to Pads 1-16 on import."
-            } else {
-                "Prefix 01-16 disabled: Original filenames preserved for general library browsing."
-            };
-            ui.label(RichText::new(hint_text).color(RolandTheme::TEXT_MUTED).size(9.5));
+            // Row 3: Pad Order
+            RolandTheme::grid_label(ui, "PAD ORDER");
+            ui.horizontal(|ui| {
+                ui.add_enabled(
+                    !is_exporting,
+                    egui::Checkbox::new(&mut state.options.pad_numbered, "Prefix 01–16"),
+                );
+                let hint = if state.options.pad_numbered {
+                    "Maps files sequentially onto Pads 1-16 on import"
+                } else {
+                    "Preserves original filenames for general browsing"
+                };
+                ui.label(RichText::new(hint).color(RolandTheme::TEXT_MUTED).size(9.0));
+            });
+            ui.end_row();
         });
 
         ui.add_space(4.0);
@@ -1267,32 +1197,31 @@ fn render_export_deck(ui: &mut Ui, state: &mut CrateState) {
         // Preflight diagnostic warnings
         if is_ro {
             ui.label(
-                RichText::new("● CANNOT WRITE: SD CARD IS MOUNTED READ-ONLY (Check physical LOCK switch)")
+                RichText::new("● CANNOT WRITE: SD CARD IS READ-ONLY (Check LOCK switch)")
                     .color(RolandTheme::METER_RED)
                     .monospace()
-                    .size(10.0),
+                    .size(9.5),
             );
         } else if is_space_insufficient {
             ui.label(
                 RichText::new(format!(
-                    "● INSUFFICIENT CARD SPACE: Requires ~{:.1} MB, but card only has {:.1} MB free",
-                    req_bytes as f64 / 1_048_576.0,
-                    free_bytes as f64 / 1_048_576.0
+                    "● INSUFFICIENT CARD SPACE: Requires ~{:.1} MB",
+                    req_bytes as f64 / 1_048_576.0
                 ))
                 .color(RolandTheme::METER_RED)
                 .monospace()
-                .size(10.0),
+                .size(9.5),
             );
         } else if !is_folder_valid && !clean_folder.is_empty() {
             ui.label(
-                RichText::new("● Folder name must be 1-16 chars without / \\ : * ? \" < > |")
+                RichText::new("● Kit name must be 1-16 chars without special symbols")
                     .color(RolandTheme::METER_RED)
                     .monospace()
-                    .size(10.0),
+                    .size(9.5),
             );
         }
 
-        // Action Button & Animated Progress
+        // Primary Action Button
         let can_export = !is_exporting
             && !state.staged_samples.is_empty()
             && is_folder_valid
@@ -1301,45 +1230,67 @@ fn render_export_deck(ui: &mut Ui, state: &mut CrateState) {
             && !is_space_insufficient;
 
         match export_progress {
-            ExportProgress::Exporting { current, total, current_name } => {
+            ExportProgress::Exporting {
+                current,
+                total,
+                current_name,
+            } => {
                 ui.ctx().request_repaint();
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.add(egui::Spinner::new().size(14.0).color(RolandTheme::ACCENT_ORANGE));
-                        ui.label(
-                            RichText::new(format!("Exporting {current}/{total} conformed WAVs..."))
-                                .strong()
-                                .color(RolandTheme::ACCENT_ORANGE)
-                                .size(11.0),
-                        );
-                    });
-                    ui.add_space(2.0);
-                    let progress = if total > 0 { current as f32 / total as f32 } else { 0.0 };
+                ui.horizontal(|ui| {
                     ui.add(
-                        egui::ProgressBar::new(progress)
-                            .text(format!("{current}/{total} ({current_name})"))
-                            .animate(true),
+                        egui::Spinner::new()
+                            .size(12.0)
+                            .color(RolandTheme::ACCENT_ORANGE),
+                    );
+                    ui.label(
+                        RichText::new(format!("Exporting {current}/{total} conformed WAVs..."))
+                            .strong()
+                            .color(RolandTheme::ACCENT_ORANGE)
+                            .size(10.0),
                     );
                 });
+                ui.add_space(2.0);
+                let progress = if total > 0 {
+                    current as f32 / total as f32
+                } else {
+                    0.0
+                };
+                ui.add(
+                    egui::ProgressBar::new(progress)
+                        .text(format!("{current}/{total} ({current_name})"))
+                        .animate(true),
+                );
             }
             ExportProgress::Success(ref msg) => {
                 ui.horizontal(|ui| {
                     render_export_button(ui, can_export, state);
-                    ui.label(RichText::new(msg).color(RolandTheme::METER_GREEN).size(11.0));
+                    ui.label(
+                        RichText::new(msg)
+                            .color(RolandTheme::METER_GREEN)
+                            .size(10.0),
+                    );
                 });
             }
             ExportProgress::Error(ref err) => {
                 ui.horizontal(|ui| {
                     render_export_button(ui, can_export, state);
-                    ui.label(RichText::new(format!("Error: {err}")).color(RolandTheme::METER_RED).size(11.0));
+                    ui.label(
+                        RichText::new(format!("Error: {err}"))
+                            .color(RolandTheme::METER_RED)
+                            .size(10.0),
+                    );
                 });
             }
             ExportProgress::Idle => {
                 ui.horizontal(|ui| {
                     render_export_button(ui, can_export, state);
                     if let Some((ref msg, is_err)) = state.status_message {
-                        let col = if is_err { RolandTheme::METER_RED } else { RolandTheme::METER_GREEN };
-                        ui.label(RichText::new(msg).color(col).size(11.0));
+                        let col = if is_err {
+                            RolandTheme::METER_RED
+                        } else {
+                            RolandTheme::METER_GREEN
+                        };
+                        ui.label(RichText::new(msg).color(col).size(10.0));
                     }
                 });
             }
@@ -1360,18 +1311,27 @@ fn render_export_button(ui: &mut Ui, can_export: bool, state: &mut CrateState) {
     } else if state.staged_samples.is_empty() {
         "Stage Samples to Export"
     } else {
-        "CONFORM & WRITE TO SD"
+        "CONFORM & WRITE TO SD (16-BIT / 48kHz)"
     };
 
     let btn_width = ui.available_width();
-    let export_btn = egui::Button::new(RichText::new(btn_text).strong().size(11.5).color(
-        if can_export {
-            RolandTheme::TEXT_ON_ACCENT
-        } else {
-            RolandTheme::TEXT_MUTED
-        },
-    ))
-    .min_size(Vec2::new(btn_width, 28.0));
+    let export_btn = egui::Button::new(
+        RichText::new(btn_text)
+            .strong()
+            .monospace()
+            .size(10.5)
+            .color(if can_export {
+                RolandTheme::TEXT_ON_ACCENT
+            } else {
+                RolandTheme::TEXT_MUTED
+            }),
+    )
+    .fill(if can_export {
+        RolandTheme::ACCENT_ORANGE
+    } else {
+        Color32::from_rgb(24, 26, 34)
+    })
+    .min_size(Vec2::new(btn_width, 24.0));
 
     if ui.add_enabled(can_export, export_btn).clicked() {
         execute_export(state);
@@ -1416,7 +1376,6 @@ fn execute_export(state: &mut CrateState) {
                 current_name: sample.clean_name.clone(),
             };
 
-            // Decode
             let audio_res = {
                 let cache_read = cache.read();
                 cache_read.get(&sample.source_path).cloned()
@@ -1439,7 +1398,6 @@ fn execute_export(state: &mut CrateState) {
                 },
             };
 
-            // Determine destination filename
             let file_name = if options.pad_numbered {
                 format!("{:02}_{}.wav", idx + 1, sample.clean_name)
             } else {
@@ -1457,7 +1415,7 @@ fn execute_export(state: &mut CrateState) {
         }
 
         *export_status.lock() = ExportProgress::Success(format!(
-            "✓ Successfully exported {success_count} conformed WAVs to {rel_import_path}/{target_folder_name}!"
+            "✓ Exported {success_count} WAVs to {rel_import_path}/{target_folder_name}!"
         ));
     });
 }
