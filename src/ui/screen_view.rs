@@ -246,23 +246,25 @@ pub fn show_screen_studio_ui(
                         );
                     });
 
-                    // Row 1: Source Ingestion Toolbar directly above screen
-                    StripBuilder::new(ui)
-                        .size(Size::relative(0.35))
-                        .size(Size::relative(0.25))
-                        .size(Size::remainder())
-                        .horizontal(|mut row| {
-                            row.cell(|ui| {
-                                let btn = egui::Button::new(
+                    // Row 1: Source Ingestion Toolbar in recessed hardware well
+                    egui::Frame::new()
+                        .fill(RolandTheme::WELL_BG)
+                        .stroke(Stroke::new(1.0, RolandTheme::BORDER_SUBTLE))
+                        .corner_radius(CornerRadius::same(4))
+                        .inner_margin(egui::Margin::symmetric(8, 4))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                let load_btn = egui::Button::new(
                                     RichText::new("Load Image")
                                         .size(9.5)
-                                        .color(RolandTheme::ACCENT_ORANGE)
-                                        .strong(),
+                                        .monospace()
+                                        .strong()
+                                        .color(RolandTheme::ACCENT_ORANGE),
                                 )
-                                .min_size(Vec2::new(ui.available_width(), 19.0));
+                                .min_size(Vec2::new(84.0, 20.0));
 
                                 if ui
-                                    .add(btn)
+                                    .add(load_btn)
                                     .on_hover_text(
                                         "Load any animated .gif, .png, .jpg, .webp, or .bmp (auto-crops to 128×64)",
                                     )
@@ -276,16 +278,18 @@ pub fn show_screen_studio_ui(
                                 {
                                     state.load_file(&path);
                                 }
-                            });
 
-                            row.cell(|ui| {
-                                let btn = egui::Button::new(
-                                    RichText::new("Paste").size(9.5).color(RolandTheme::TEXT_PRIMARY),
+                                let paste_btn = egui::Button::new(
+                                    RichText::new("Paste")
+                                        .size(9.5)
+                                        .monospace()
+                                        .strong()
+                                        .color(RolandTheme::TEXT_PRIMARY),
                                 )
-                                .min_size(Vec2::new(ui.available_width(), 19.0));
+                                .min_size(Vec2::new(54.0, 20.0));
 
                                 if ui
-                                    .add(btn)
+                                    .add(paste_btn)
                                     .on_hover_text(
                                         "Paste an image or file path directly from your Linux clipboard",
                                     )
@@ -293,15 +297,16 @@ pub fn show_screen_studio_ui(
                                 {
                                     state.paste_from_clipboard();
                                 }
-                            });
 
-                            row.cell(|ui| {
                                 let mut chosen_preset = state.active_preset;
+                                let combo_w = (ui.available_width() - 4.0).max(120.0);
                                 egui::ComboBox::from_id_salt("oled_demo_preset")
                                     .selected_text(
-                                        RichText::new(format!("{chosen_preset}")).size(9.5),
+                                        RichText::new(format!("Preset: {chosen_preset}"))
+                                            .size(9.5)
+                                            .monospace(),
                                     )
-                                    .width(ui.available_width())
+                                    .width(combo_w)
                                     .show_ui(ui, |ui| {
                                         for p in DemoPreset::iter() {
                                             ui.selectable_value(
@@ -317,7 +322,7 @@ pub fn show_screen_studio_ui(
                             });
                         });
 
-                    ui.add_space(3.0);
+                    ui.add_space(4.0);
 
                     // Row 2: Hero OLED Bezel
                     if let Some(frame) = state.mono_frames.get(state.current_frame) {
