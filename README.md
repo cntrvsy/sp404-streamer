@@ -33,7 +33,7 @@ On Linux, Discord and Vesktop capture audio exclusively from application windows
 - **Kit Arrangement:** Live search filtering and pad ordering (`01–16`) with manual controls or keyboard shortcuts.
 - **Hardware Conforming Engine:** Resamples audio to 48,000 Hz 16-bit linear PCM WAV with optional **TPDF dithering**, **leading silence trimming**, and **de-click micro-fades**, matching the SP-404MKII's native SD card import specification (preventing "File Not Supported" hardware rejection). Preserves mono files as single-channel mono to conserve SP-404MKII polyphony (1 voice instead of 2).
 - **Display & FAT32 Sanitization:** Strips illegal FAT32 characters and formats filenames (default: 16 characters) for clean, readable rendering on the SP-404MKII OLED display.
-- **SD Hotplug, `.tar.zst` Snapshots & Safe Ejection:** Discovers SD cards via `udisks2`, creates one-click compressed `.tar.zst` project backups in `~/Music/SP404-Backups/`, checks hardware write-lock switches, verifies available disk capacity, executes kernel cache flushes (`sync_all()`), and unmounts safely.
+- **SD Hotplug & Safe Ejection:** Discovers SD cards via `udisks2`, checks hardware write-lock switches, verifies available disk capacity, executes kernel cache flushes (`sync_all()`), and unmounts safely.
 
 ### OLED Screen Studio (`128 × 64` 1-Bit BMP)
 - **GIF & Image Ingestion:** Load any animated `.gif`, `.png`, `.jpg`, `.webp`, or `.bmp` via native desktop portal dialogs, drag-and-drop, or Linux clipboard paste (`arboard`).

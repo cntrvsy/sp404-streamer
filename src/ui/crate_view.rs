@@ -13,9 +13,6 @@ use parking_lot::{Mutex, RwLock};
 use tracing::{error, warn};
 
 use crate::audio::PreviewPlayer;
-use crate::sample_crate::backup::{
-    BackupProgress, create_sd_snapshot, default_backup_dir, generate_snapshot_filename,
-};
 use crate::sample_crate::conformer::{
     DecodedAudio, decode_audio_file, export_conformed_wav, stage_audio_file,
 };
@@ -83,8 +80,6 @@ pub struct CrateState {
     pub status_message: Option<(String, bool)>, // (message, is_error)
     pub export_status: Arc<Mutex<ExportProgress>>,
     pub export_cancel_flag: Arc<AtomicBool>,
-    pub backup_status: Arc<Mutex<BackupProgress>>,
-    pub backup_cancel_flag: Arc<AtomicBool>,
     pub auto_chop_enabled: bool,
     pub chop_slice_count: usize,
     pub chop_even_grid: bool,
@@ -107,8 +102,6 @@ impl Default for CrateState {
             status_message: None,
             export_status: Arc::new(Mutex::new(ExportProgress::Idle)),
             export_cancel_flag: Arc::new(AtomicBool::new(false)),
-            backup_status: Arc::new(Mutex::new(BackupProgress::Idle)),
-            backup_cancel_flag: Arc::new(AtomicBool::new(false)),
             auto_chop_enabled: false,
             chop_slice_count: 16,
             chop_even_grid: false,
@@ -207,35 +200,6 @@ fn is_supported_audio_extension(path: &Path) -> bool {
 /// Renders the Crate view in the given egui UI.
 pub fn render_crate_view(ui: &mut Ui, state: &mut CrateState, preview_player: &PreviewPlayer) {
     state.refresh_sd_if_needed();
-
-    // Check if background snapshot completed
-    let finished_backup = {
-        let mut guard = state.backup_status.lock();
-        match &*guard {
-            BackupProgress::Completed {
-                archive_path,
-                size_bytes,
-                file_count,
-            } => {
-                let mb = *size_bytes as f64 / (1024.0 * 1024.0);
-                let msg = format!(
-                    "✓ Saved SD snapshot ({file_count} files, {mb:.1} MB) to {}",
-                    archive_path.display()
-                );
-                *guard = BackupProgress::Idle;
-                Some((msg, false))
-            }
-            BackupProgress::Failed(err) => {
-                let msg = format!("Snapshot error: {err}");
-                *guard = BackupProgress::Idle;
-                Some((msg, true))
-            }
-            _ => None,
-        }
-    };
-    if let Some(status) = finished_backup {
-        state.status_message = Some(status);
-    }
 
     if preview_player.is_playing() {
         ui.ctx().request_repaint();
@@ -417,54 +381,10 @@ pub fn render_global_sd_pill(ui: &mut Ui, state: &mut CrateState) {
                 );
             }
 
-            let backup_prog = state.backup_status.lock().clone();
-            let is_backing_up = backup_prog.is_running();
-
-            let snap_label = match backup_prog {
-                BackupProgress::Running {
-                    files_done,
-                    total_files,
-                    ..
-                } => {
-                    ui.ctx().request_repaint();
-                    format!("{files_done}/{total_files}")
-                }
-                _ => "📦 Snapshot".to_string(),
-            };
-
-            if ui
-                .add_enabled(
-                    !is_exporting && !is_backing_up,
-                    egui::Button::new(
-                        RichText::new(snap_label)
-                            .color(RolandTheme::ACCENT_AMBER)
-                            .size(9.0)
-                            .monospace(),
-                    )
-                    .small(),
-                )
-                .on_hover_text(
-                    "Create a full compressed .tar.zst snapshot in ~/Music/SP404-Backups/",
-                )
-                .clicked()
-            {
-                let sd_root = sd.mount_path.clone();
-                let dest_path = default_backup_dir().join(generate_snapshot_filename(&sd.label));
-                let prog_arc = Arc::clone(&state.backup_status);
-                let cancel_arc = Arc::clone(&state.backup_cancel_flag);
-                cancel_arc.store(false, Ordering::Relaxed);
-                std::thread::spawn(move || {
-                    if let Err(e) = create_sd_snapshot(&sd_root, &dest_path, &prog_arc, &cancel_arc)
-                    {
-                        *prog_arc.lock() = BackupProgress::Failed(e.to_string());
-                    }
-                });
-            }
-
             let eject_btn = ui.add_enabled(
-                !is_exporting && !is_backing_up,
+                !is_exporting,
                 egui::Button::new(
-                    RichText::new("⏏")
+                    RichText::new("⏏ Eject")
                         .color(RolandTheme::TEXT_PRIMARY)
                         .size(9.5),
                 )
