@@ -39,8 +39,8 @@ fn main() -> eframe::Result<()> {
         eframe::icon_data::from_png_bytes(include_bytes!("../assets/sp404-streamer.png")).ok();
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([480.0, 545.0])
-        .with_min_inner_size([380.0, 360.0])
+        .with_inner_size([480.0, 580.0])
+        .with_min_inner_size([380.0, 420.0])
         .with_resizable(true)
         .with_app_id("sp404-streamer")
         .with_title("SP-404MKII Streamer & Crate");

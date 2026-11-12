@@ -184,9 +184,8 @@ pub fn show_screen_studio_ui(
         }
     }
 
-    // Dynamic bottom deck budget:
-    // Base height: 20px header + 22px ingest + 22px dither + 22px thresh + 22px project + 24px action + paddings = 162px
-    let mut bottom_deck_h = 162.0;
+    // Base height for the lower deck: 182px (covers header, ingest bar, 3-row form grid, and action bar comfortably)
+    let mut bottom_deck_h = 182.0;
     if state.show_hardware_guide {
         bottom_deck_h += 48.0;
     }
@@ -196,7 +195,7 @@ pub fn show_screen_studio_ui(
 
     // Universal 2-Deck Model: Upper OLED Stage (Hero) + Lower Ingest/Dither/Sync Deck
     StripBuilder::new(ui)
-        .size(Size::remainder().at_least(140.0))
+        .size(Size::remainder().at_least(120.0))
         .size(Size::exact(RolandTheme::CARD_GAP))
         .size(Size::exact(bottom_deck_h))
         .vertical(|mut strip| {
