@@ -1,51 +1,72 @@
-# SP-404MKII Integration Roadmap & Capabilities Reference
+# SP-404MKII Integration Roadmap & Verified Capabilities Reference
 
-This document tracks all potential features, enhancements, and hardware integrations for `sp404-streamer` that **do not require reverse engineering firmware or proprietary binary blobs**.
+This document tracks features, enhancements, and hardware integrations for `sp404-streamer` that **do not require reverse engineering firmware, undocumented SysEx, or proprietary `.BIN` project files**.
 
-Because the Roland SP-404MKII is **USB Audio Class Compliant**, **USB MIDI Class Compliant**, and relies on a standard **FAT32/exFAT SD card filesystem**, extensive hardware integration is achievable using officially documented specifications and standard Linux audio/MIDI infrastructure.
-
----
-
-## Feasibility & Protocol Matrix
-
-| Capability Area | Protocols / Standards Used | Requires Firmware RE? | Roland Documentation Status | Feasibility |
-| :--- | :--- | :---: | :---: | :---: |
-| **Custom Launch & Screensaver Animations** | 1-bit BMP, FAT32/exFAT SD Card | ❌ No | Officially Documented (Firmware v2.0+) | **100% Ready** |
-| **Audio Conforming (16-bit/48kHz WAV)** | Linear PCM WAV (`hound`), Resampling (`rubato`) | ❌ No | Officially Documented (SD Import Spec) | **Implemented** |
-| **Transient Auto-Chop (16 Slices)** | DSP onset detection, FAT32 SD Card | ❌ No | Open DSP standard | **100% Ready** |
-| **Zero-Crossing & Click Prevention** | PCM audio sample manipulation | ❌ No | Open DSP standard | **100% Ready** |
-| **BPM & Key Detection / Pitch Tuning** | Autocorrelation / FFT pitch detection | ❌ No | Open DSP standard | **100% Ready** |
-| **Multi-Bank Kit Builder (160 Pads)** | FAT32 filesystem (`IMPORT/Bank_X/`) | ❌ No | Officially Documented SD structure | **100% Ready** |
-| **Virtual 4×4 Pad Triggering** | USB MIDI Note On/Off (Ch 1 & Ch 2) | ❌ No | Officially Documented MIDI Spec | **100% Ready** |
-| **Live MFX / Macro Knob Control** | USB MIDI CC (#19, #20, #21, etc.) | ❌ No | Officially Documented MIDI Spec | **100% Ready** |
-| **BPM Master Clock & Transport** | USB MIDI Realtime (`0xF8`, `0xFA`, `0xFC`) | ❌ No | Standard MIDI 1.0 Spec | **100% Ready** |
-| **Pattern Song Arranger** | USB MIDI Program Change & Note Trigger | ❌ No | Officially Documented MIDI Spec | **100% Ready** |
-| **Desktop-to-SP Audio Bridge** | PipeWire Loopback & Virtual Sinks | ❌ No | Linux standard (PipeWire API) | **Implemented** |
-| **One-Click Resample Stem Recorder** | PipeWire capture, WAV writer | ❌ No | Class Compliant USB Audio | **100% Ready** |
-| **SD Project Backup & Archive** | Filesystem tarball (`.tar.zst` / `.zip`) | ❌ No | Standard POSIX / FAT32 file I/O | **100% Ready** |
-| *Direct Pad-to-RAM Sample Injection* | Proprietary USB SysEx commands | ⚠️ Yes | Undocumented (Roland Desktop App only) | Deferred |
-| *Direct `.BIN` Project File Editing* | Proprietary binary data format | ⚠️ Yes | Undocumented internal memory layout | Deferred |
+All specifications below are cross-referenced against Roland's official **SP-404MKII Reference Manual (v4/v5)** and **MIDI Implementation Chart (v5.00+)**.
 
 ---
 
-## 1. Custom Launch Animations & Screensavers (OLED Engine)
+## Recommended Implementation Order
 
-The SP-404MKII graphic OLED display operates at **128 × 64 pixels**. Firmware v2.0+ allows loading custom startup pictures and multi-frame screensaver loops.
+Features are ordered by reliability against Roland's documented hardware behavior. **Items 1, 2, 8, and 4** form the recommended initial release milestone.
 
-### Official Roland Specifications
-* **Dimensions:** Exactly `128 x 64` pixels.
+### Tier 1: Safe & Officially Documented
+1. **Screen Editor (Startup & Screensaver):**
+   * 128×64 preview, Floyd-Steinberg dithering / thresholding, and a 16-frame animation sampler.
+   * Writes into `EXPORT/PROJECT/PROJECT_XX/PICTURE/` and walks the user through the required hardware project export/re-import round trip.
+2. **Sample Prep & Conforming (Core Implemented):**
+   * Convert to 48 kHz / 16-bit linear PCM WAV (preserving mono/stereo), with optional TPDF dither, leading silence trimming, short de-click micro-fades, and peak normalization. Writes results to `IMPORT/`.
+3. **Auto-Chop to Individual WAVs:**
+   * Onset detection slices loops/breaks into numbered WAV files (`01_slice.wav` .. `16_slice.wav`) inside `IMPORT/<Kit_Name>/`.
+   * *Note:* The user still assigns samples to pads via the on-device import menu (`SHIFT + PAD 14`); filenames do not automatically populate pads.
+4. **Virtual Pad Grid over USB MIDI:**
+   * Configurable for **MIDI Mode A** (10 channels, notes `36–51`) and **MIDI Mode B** (2 channels, notes `12–91`), plus adjustable note offset settings.
+   * Sends **Note On only** (Roland's MIDI implementation chart lists `Note Off` as unrecognized).
+5. **Effect Controller (USB MIDI CC):**
+   * `CC #16–18` for CTRL 1–3, `CC #19` for EFX On/Off switch, `CC #80–82` for CTRL 4–6, and `CC #83` for EFX Type number.
+   * Supports per-bus MIDI channel routing, X/Y pads, MIDI learn, and software LFOs.
+6. **Pattern Selector / Chainer:**
+   * Uses standard **Program Change** messages (`PC #0` = Pattern 1) to sequence or trigger patterns on a timer. (Does not rely on undocumented note triggers).
+7. **MIDI Clock Master:**
+   * Sends Realtime Clock (`0xF8`), Start (`0xFA`), and Stop (`0xFC`) with a tempo knob and tap tempo, paired with verification against the unit's MIDI sync settings.
+
+### Tier 2: Safe Plain Filesystem Utilities
+8. **Full SD Card Snapshot:**
+   * Archive the entire SD card (`ROLAND/`, `IMPORT/`, `EXPORT/`) as a timestamped `.tar.zst` archive for instant backup and live-set swapping.
+9. **Duplicate Finder & Library Browser:**
+   * Content-hash (`BLAKE3`) files on the SD card, provide waveform auditioning, search, and compare `IMPORT/` usage against free card capacity.
+10. **Multipad Export Organizer:**
+    * Organize and batch-rename individual pattern WAV stems exported by the SP-404MKII into clean DAW stem folders.
+
+### Tier 3: Linux Audio (PipeWire)
+11. **One-Click Resample Recorder:**
+    * Capture the SP-404MKII's class-compliant USB audio stream into lossless WAV files with auto-trim and normalization (verifying actual PipeWire channel layout via `pw-dump`).
+12. **Desktop-to-SP Audio Bridge (Core Implemented):**
+    * Route desktop application audio into the SP-404MKII's USB input via PipeWire virtual sinks and loopbacks.
+
+### Explicitly Skipped / Out of Scope
+* **Editing `.BIN` project files or SysEx Pad-to-RAM injection:** Proprietary and undocumented.
+* **Writing musical key metadata to hardware:** The SP-404MKII does not persist key metadata (as of firmware v5.52); any key/BPM detection stays strictly inside the desktop app UI.
+* **Automatic bank folder mapping:** Folders inside `IMPORT/` are for human browsing on the OLED screen; they do not auto-assign to hardware banks.
+
+---
+
+## Detailed Hardware Specifications
+
+### 1. Custom Startup Screens & Screensavers (OLED)
+
+* **Dimensions:** Exactly `128 × 64` pixels.
 * **Format:** Windows Bitmap (`.BMP`).
-* **Color Depth:** 1-bit Monochrome (Pure Black `#000000` / Pure White `#FFFFFF`).
-* **Startup Images:**
-  * `startup_1.bmp`, `startup_2.bmp` (shown sequentially upon boot/load).
-* **Screensaver Animation Frames:**
-  * `screen_saver_1.bmp` through `screen_saver_16.bmp` (cycles up to a 16-frame looping flipbook when the unit goes idle).
-* **Target Path on SD Card:**
+* **Color Depth:** Hardware accepts 1-, 4-, 8-, and 24-bit BMPs, but renders strictly in monochrome on the OLED. Exporting **1-bit monochrome** is preferred to give the user exact WYSIWYG dithering control and avoid internal gray thresholding artifacts.
+* **Naming Conventions:**
+  * Startup (Opening) Images: `startup_1.bmp`, `startup_2.bmp` (2 images per project).
+  * Screensaver Frames: `screen_saver_1.bmp` through `screen_saver_16.bmp` (up to 16 frames cycled sequentially).
+* **SD Card Path & Hardware Round-Trip Workflow:**
   ```text
   SD-CARD/
   └── EXPORT/
       └── PROJECT/
-          └── <PROJECT_NAME>/
+          └── PROJECT_01/   <-- Numbered project folder exported by hardware
               └── PICTURE/
                   ├── startup_1.bmp
                   ├── startup_2.bmp
@@ -53,126 +74,66 @@ The SP-404MKII graphic OLED display operates at **128 × 64 pixels**. Firmware v
                   ├── ...
                   └── screen_saver_16.bmp
   ```
-
-### Proposed `sp404-streamer` Feature
-* **GIF / Video / Image Ingestion:** Drag-and-drop any `.gif`, `.png`, or `.mp4` clip into the UI.
-* **16-Frame Sampling:** Auto-distribute 16 evenly spaced keyframes across the animation loop.
-* **Dithering & Threshold Engine:**
-  * Floyd-Steinberg error diffusion dithering.
-  * Contrast, brightness, and inversion (negative) adjustments.
-  * Live pixel-perfect 128×64 OLED preview widget in `egui` (simulating the amber/white display).
-* **1-Click Sync to SD:** Auto-generate 1-bit BMP files and write directly to `EXPORT/PROJECT/<selected_project>/PICTURE/`.
+  **Required User Steps on Hardware:**
+  1. Export the target project to the SD card (`SHIFT + PAD 14` -> Export -> Project).
+  2. Sync the generated `.bmp` files into `EXPORT/PROJECT/PROJECT_XX/PICTURE/` using `sp404-streamer`.
+  3. Enable custom screensavers on the unit: `SHIFT + PAD 13 (UTILITY)` -> `SYSTEM` -> `Screen Saver Type: Custom`.
+  4. Re-import the project from the SD card (`SHIFT + PAD 14` -> Import -> Project).
 
 ---
 
-## 2. Advanced Sample Crate & DSP Tools
+### 2. USB MIDI Implementation (Verified v5.00+ Spec)
 
-### A. 16-Bit / 48 kHz Hardware Conforming (Current & Enhancements)
-* **Status:** Implemented (`src/sample_crate/conformer.rs`).
-* **Verification:** Roland SP-404MKII standalone SD card import (`SHIFT + PAD 14`) strictly rejects 24-bit WAVs with `"File Not Supported!"`. All exports must remain 16-bit linear PCM at 48 kHz.
-* **Next DSP Step:** Optional TPDF (Triangular Probability Density Function) dither during float-to-16-bit quantization.
+#### A. Pad Triggering Modes (Mode A vs. Mode B)
+The SP-404MKII provides two MIDI pad modes in `UTILITY -> SYSTEM -> MIDI`. The desktop app must allow switching between both modes and configuring note offsets:
 
-### B. Transient Auto-Chop to 16 Pads
-* **Concept:** Drop a drum break or sample loop into the crate and slice it into exactly 16 pads.
-* **Algorithm:** High-frequency energy onset detection (or spectral flux) to detect drum transients.
-* **Export Mapping:** Automatically outputs slices formatted as `01_kick.wav` to `16_crash.wav` directly into a target folder under `IMPORT/<Kit_Name>/` for immediate 1-to-1 pad loading on the hardware.
+| Mode | Channel Layout | Default Note Range | Behavior |
+| :--- | :--- | :--- | :--- |
+| **Mode A** | **Channels 1–10** (1 channel per Bank A–J) | Notes `36–51` (C2–D#3) per channel | Each bank is isolated on its own MIDI channel. Note offsets are adjustable. |
+| **Mode B** | **Channel 1** (Banks A–E) & **Channel 2** (Banks F–J) | Notes `12–91` (C0–G6) per channel | Compresses 5 banks (80 pads) onto each of the two channels. Note offsets are adjustable. |
 
-### C. Zero-Crossing & De-Clicking
-* **Silence Stripping:** Trims leading silence to the first non-zero sample so pads hit with zero latency.
-* **Micro-Fading:** Applies a 1–2 ms raised-cosine fade at the start and end of every sample to eliminate DC pops and truncation clicks.
+* **Note On Only:** According to the official MIDI Implementation Chart, **Note Off is not recognized (`x`)**. Virtual pad triggers must send `Note On` messages; sample stop/sustain behavior is controlled by the hardware pad's Gate/One-Shot and Mute Group settings.
 
-### D. BPM & Pitch Detection / Chromatic Tuning
-* **Pitch Detection:** Auto-detect the root musical key of one-shots (e.g. F#2) and calculate the semitone pitch shift to transpose it to C.
-* **Utility:** SP-404MKII Chromatic Mode (`SHIFT + PAD 4`) assumes samples are tuned to C for melodic pad play.
+#### B. Effect Bus Control Changes (CC)
+Effect controls operate across the unit's effect buses (with a dedicated MIDI channel per bus according to the MIDI implementation chart):
 
-### E. Multi-Bank Kit Builder (160 Pads)
-* **Concept:** Organize samples across all 10 banks (Bank A through Bank J = 160 pads).
-* **Folder Hierarchy:** Exports structured folders to the SD card:
-  ```text
-  SD-CARD/
-  └── IMPORT/
-      ├── 01_BANK_A/ (Pads 01-16)
-      ├── 02_BANK_B/ (Pads 01-16)
-      └── ...
-  ```
+| Control Change | Target Parameter | Value Range / Notes |
+| :--- | :--- | :--- |
+| **`CC #16`** | **CTRL 1** Knob | `0–127` (Primary effect parameter 1) |
+| **`CC #17`** | **CTRL 2** Knob | `0–127` (Primary effect parameter 2) |
+| **`CC #18`** | **CTRL 3** Knob | `0–127` (Primary effect parameter 3) |
+| **`CC #19`** | **EFX On/Off Switch** | `0–63` = Off, `64–127` = On |
+| **`CC #80`** | **CTRL 4** Parameter | `0–127` (Sub-page parameter 4) |
+| **`CC #81`** | **CTRL 5** Parameter | `0–127` (Sub-page parameter 5) |
+| **`CC #82`** | **CTRL 6** Parameter | `0–127` (Sub-page parameter 6) |
+| **`CC #83`** | **Effect Number** | Selects active MFX type on the target bus |
+
+#### C. Pattern Selection
+* **Program Change (`PC`):** Patterns are triggered via standard MIDI Program Change messages (`PC #0` selects Pattern 1, `PC #1` selects Pattern 2, etc.).
 
 ---
 
-## 3. USB MIDI Live Hardware Integration
+### 3. Audio Conforming & Sample Crate (`IMPORT/`)
 
-The SP-404MKII exposes standard USB MIDI class compliance on Linux (`/dev/snd/midi*` and ALSA/PipeWire MIDI endpoints). Roland officially publishes the [SP-404MKII MIDI Implementation](https://www.roland.com/global/support/by_product/sp-404mk2/owners_manuals/).
-
-### A. Virtual 4×4 Pad Controller
-* **Triggering Scheme (Officially Documented):**
-  * **MIDI Channel 1:**
-    * Bank A: Notes 36–51 (C2–D#3)
-    * Bank B: Notes 52–67 (E3–G4)
-    * Bank C: Notes 68–83 (G#4–B5)
-    * Bank D: Notes 84–99 (C6–D#7)
-    * Bank E: Notes 100–115 (E7–G8)
-  * **MIDI Channel 2:**
-    * Banks F through J (same note layout).
-* **UI Component:** A visual 4×4 grid in `sp404-streamer` that lights up in real time when pads are triggered, allowing desktop triggering via mouse or keyboard hotkeys.
-
-### B. Real-Time MFX / Macro Knob Control
-* **Documented Control Changes:**
-  * `CC #19`: CTRL 1 Knob
-  * `CC #20`: CTRL 2 Knob
-  * `CC #21`: CTRL 3 Knob
-  * `CC #22`: Main Volume / Master Level
-  * `CC #16`: Bus 1 Effect Select
-  * `CC #17`: Bus 2 Effect Select
-* **Proposed Features:**
-  * Onscreen macro sliders and X/Y control pads.
-  * Desktop software LFOs to automate filter sweeps, vinyl warp, or delay repeats on the hardware over MIDI.
-
-### C. Master MIDI Clock & Transport Sync
-* **MIDI Realtime Messages:**
-  * `0xF8`: Timing Clock (24 pulses per quarter note).
-  * `0xFA`: Start.
-  * `0xFC`: Stop.
-* **Utility:** Lock the SP-404MKII's internal delay, roll, and pattern sequencer to your computer's tempo with zero timing drift.
-
-### D. Visual Song Arranger / Pattern Trigger
-* **Pattern Triggering:** Patterns 1–16 across banks can be triggered via MIDI Program Change or Note messages.
-* **Proposed Feature:** A visual timeline sequencer on Linux where users lay out patterns (e.g. Intro -> Verse -> Hook -> Outro) and `sp404-streamer` triggers pattern changes over MIDI, providing an arranger view for live performances.
+* **Internal Hardware Format:** The SP-404MKII converts all imported audio to **48 kHz / 16-bit linear PCM** internally.
+* **SD Card Import Safety:** Roland's documentation notes 16-bit linear WAV/AIFF/MP3 for SD card import (with conflicting tables mentioning 24-bit). Conforming all exported crate samples to **48,000 Hz, 16-bit linear PCM WAV** guarantees 100% compatibility and zero on-device conversion overhead.
+* **Polyphony Preservation:** Exporting mono sources as 1-channel mono WAVs preserves hardware voice polyphony (consuming 1 voice instead of 2).
 
 ---
 
-## 4. PipeWire Audio & Resample Workflow
+## Official References & Sources
 
-The SP-404MKII operates as a **24-bit / 48,000 Hz** multi-channel USB Audio interface on Linux.
-
-### A. One-Click Resample & Stem Capture
-* Stream audio from the SP-404MKII into a low-overhead memory ring buffer.
-* One-click "Record Stem / Jam" button that writes conformed WAV files directly to disk with auto-normalization and silence trimming.
-
-### B. Desktop-to-SP Quick Sampling Bridge
-* Allow routing arbitrary application audio (browser, Spotify, DAW, media player) directly into the SP-404MKII's USB In.
-* Eliminates audio cables and DAC conversion noise when sampling audio directly from the computer.
-
-### C. Cue Bus Monitoring
-* Route audition previews directly to the SP-404MKII Cue channel (Headphones) without bleeding into the Main output mix or stream broadcast.
-
----
-
-## 5. SD Card Project Snapshots & Library Management
-
-### A. One-Click Full Project Backup
-* Create atomic compressed archives (`.tar.zst` or `.zip`) of the entire `ROLAND/` and `IMPORT/` tree with automated timestamping.
-* Enables swapping entire multi-gigabyte project states without buying multiple SD cards.
-
-### B. Duplicate Sample Identification
-* Fast BLAKE3 or SHA-256 hash scanning across SD card directories to flag and clean up redundant samples.
-
----
-
-## References & Official Documentation
-
-1. **Roland SP-404MKII Support - Supported Audio Formats:**
-   [https://support.roland.com/hc/en-us/articles/4408190553883](https://support.roland.com/hc/en-us/articles/4408190553883)
-2. **Roland SP-404MKII Reference Manual & MIDI Implementation:**
-   [https://www.roland.com/global/support/by_product/sp-404mk2/owners_manuals/](https://www.roland.com/global/support/by_product/sp-404mk2/owners_manuals/)
-3. **Roland SP-404MKII Version 2.0 / 3.0 / 4.0 Supplementary Manuals (Custom BMP Specifications):**
-   [https://www.roland.com/global/support/by_product/sp-404mk2/updates_drivers/](https://www.roland.com/global/support/by_product/sp-404mk2/updates_drivers/)
-
+1. **Roland SP-404MKII Reference Manual v4 (Custom Opening & Screensaver Images):**
+   [https://static.roland.com/manuals/sp-404mk2_reference_v4/en-US/7948148378524043.html](https://static.roland.com/manuals/sp-404mk2_reference_v4/en-US/7948148378524043.html)
+2. **Roland SP-404MKII Reference Manual v5.00 (MIDI Implementation Chart):**
+   [https://static.roland.com/manuals/sp-404mk2_reference_v500/en-US/8010996378593163.html](https://static.roland.com/manuals/sp-404mk2_reference_v500/en-US/8010996378593163.html)
+3. **Roland Support — How Are the MIDI Notes Mapped?:**
+   [https://support.roland.com/hc/en-us/articles/25793219901851-SP-404MK2-How-are-the-MIDI-notes-mapped](https://support.roland.com/hc/en-us/articles/25793219901851-SP-404MK2-How-are-the-MIDI-notes-mapped)
+4. **Roland Support — What Audio File Formats Can Be Imported?:**
+   [https://support.roland.com/hc/en-us/articles/4408190553883-SP-404MK2-Audio-file-formats-that-can-be-imported](https://support.roland.com/hc/en-us/articles/4408190553883-SP-404MK2-Audio-file-formats-that-can-be-imported)
+5. **Roland Articles — Customizing Faceplates, Startup Screens & Screensavers:**
+   [https://articles.roland.com/?p=40192](https://articles.roland.com/?p=40192)
+6. **Sweetwater — Working with Projects and Samples on the Roland SP-404MKII:**
+   [https://www.sweetwater.com/sweetcare/articles/working-with-projects-and-samples-on-the-roland-sp-404mkii/](https://www.sweetwater.com/sweetcare/articles/working-with-projects-and-samples-on-the-roland-sp-404mkii/)
+7. **SparkyMK2 Release Notes (Hardware Key Metadata Behavior):**
+   [https://github.com/TuscanPL/SparkyMK2/releases](https://github.com/TuscanPL/SparkyMK2/releases)
