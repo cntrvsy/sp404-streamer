@@ -59,9 +59,13 @@ The app targets a compact floating window (`480 × 545` default, `380 × 360` mi
      * Background: `RolandTheme::WELL_BG` (`rgb(9, 10, 13)`)
      * Border: `Stroke::new(1.0, RolandTheme::BORDER_SUBTLE)` (`rgb(26, 28, 36)`)
      * Corner Radius: `CornerRadius::same(4)`
-5. **Avoid Nested Scrollbars & Layout Thrashing**:
-   * Never nest vertical `ScrollArea`s. Only one primary table/list area in a tab should scroll vertically; headers and footers remain fixed.
-   * For multi-column tables, always use `egui_extras::TableBuilder` with explicit `Column::exact(...)` and one `Column::remainder()`. Dynamically budget table scroll height (`(ui.available_height() - reserved).max(...)`).
+5. **Natural Vertical Flow vs Rigid Pixel Math**:
+   * Do NOT force non-table views (`STREAM HUD`, `OLED STUDIO`) into rigid internal `StripBuilder` cell heights (`Size::exact(142.0)`). Hardcoded pixel budgets cause clipping whenever window sizes or font metrics shift.
+   * Instead, wrap the fluid tab body in `egui::ScrollArea::vertical().auto_shrink([false, false])`.
+   * Let rack cards determine their natural height (`RolandTheme::rack_card_frame().show(ui, |ui| { ... })`).
+   * For the hardware `OledDisplayWidget`, size it predictably to rack width (`scale = ((avail_w - 32.0) / 128.0).clamp(1.8, 2.5)`).
+   * Result: When window has sufficient height, cards expand cleanly with zero scrollbar; when window is resized small or guides are toggled, smooth scrolling prevents any widget or slider from ever clipping.
+6. **Keyboard Focus & State Discipline**:
    * When listening for keyboard shortcuts (`Space`, `Delete`, `Arrows`), always check `if !ui.ctx().egui_wants_keyboard_input()` to prevent capturing keys while typing in text inputs.
    * Inside `ui.horizontal(...)`, defer mutations (like deleting or reordering items) using an enum action (e.g. `RowAction`) applied *after* the UI closure finishes.
 

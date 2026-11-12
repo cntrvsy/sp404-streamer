@@ -373,16 +373,15 @@ impl Sp404StreamerApp {
         is_clipped_l: bool,
         is_clipped_r: bool,
     ) {
-        // Universal 2-Deck Model: Upper Visual Stage (Remainder) + Lower Control Deck (Exact 138px)
-        StripBuilder::new(ui)
-            .size(Size::remainder().at_least(180.0))
-            .size(Size::exact(RolandTheme::CARD_GAP))
-            .size(Size::exact(138.0))
-            .vertical(|mut strip| {
+        // Fluid Vertical Flow: Natural card sizing with zero clipping
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+
                 // ================================================================
-                // UPPER STAGE (Remainder): Master VU Console & Connection Readout
+                // UPPER STAGE: Master VU Console & Connection Readout
                 // ================================================================
-                strip.cell(|ui| {
                     let peak_max = cur_l.max(cur_r);
                     let peak_color = if peak_max >= -0.1 {
                         RolandTheme::METER_RED
@@ -474,15 +473,13 @@ impl Sp404StreamerApp {
                                 });
                             });
                     });
-                });
 
-                strip.cell(|_ui| {});
+                ui.add_space(RolandTheme::CARD_GAP);
 
                 // ================================================================
-                // LOWER CONTROL DECK (Exact 138px): Monitor Volume & Output Routing
+                // LOWER CONTROL DECK: Monitor Volume & Output Routing
                 // ================================================================
-                strip.cell(|ui| {
-                    RolandTheme::rack_card_frame().show(ui, |ui| {
+                RolandTheme::rack_card_frame().show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         let (chip_color, chip_text) = if self.volume_percent <= 0.01 {
                             (RolandTheme::METER_RED, "MUTED (0%)".to_string())
@@ -634,6 +631,5 @@ impl Sp404StreamerApp {
                         });
                     });
                 });
-            });
     }
 }

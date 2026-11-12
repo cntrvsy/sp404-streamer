@@ -34,17 +34,15 @@ impl<'a> OledDisplayWidget<'a> {
 
     pub fn show(self, ui: &mut Ui) -> Response {
         let avail_w = ui.available_width();
-        let avail_h = ui.available_height();
 
-        // Cap scale by both available width and available height (reserving 26px for bezel padding)
-        // so the 2:1 OLED screen never pushes the transport bar off the card.
-        let scale_w = (avail_w - 16.0) / OLED_WIDTH as f32;
-        let scale_h = ((avail_h - 26.0).max(96.0)) / OLED_HEIGHT as f32;
-        let scale = scale_w.min(scale_h).clamp(1.6, 3.2);
+        // Size the 128×64 dot-matrix screen naturally based on available width
+        // On a 440-480px rack width, scale ~2.3 gives a generous 295×147 px screen
+        let scale_w = (avail_w - 32.0) / OLED_WIDTH as f32;
+        let scale = scale_w.clamp(1.8, 2.5);
 
         let screen_w = OLED_WIDTH as f32 * scale;
         let screen_h = OLED_HEIGHT as f32 * scale;
-        let bezel_h = (screen_h + 24.0).max(avail_h.min(screen_h + 36.0));
+        let bezel_h = screen_h + 34.0;
 
         let (bezel_rect, response) =
             ui.allocate_exact_size(Vec2::new(avail_w, bezel_h), Sense::click());

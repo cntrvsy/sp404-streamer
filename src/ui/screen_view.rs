@@ -215,26 +215,16 @@ pub fn show_screen_studio_ui(
         }
     }
 
-    // Calculate lower deck height based on active tab and auxiliary elements
-    let mut bottom_deck_h = 142.0;
-    if state.sub_tab == OledStudioSubTab::SdSync && state.show_hardware_guide {
-        bottom_deck_h += 44.0;
-    }
-    if state.status_message.is_some() {
-        bottom_deck_h += 16.0;
-    }
+    // Natural Vertical Scroll Area: Fluid sizing with zero clipping across all window heights
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
 
-    // Universal 2-Deck Model: Upper OLED Canvas & Ingest + Lower Focused Sub-Deck
-    StripBuilder::new(ui)
-        .size(Size::remainder().at_least(140.0))
-        .size(Size::exact(RolandTheme::CARD_GAP))
-        .size(Size::exact(bottom_deck_h))
-        .vertical(|mut strip| {
             // ================================================================
-            // UPPER HERO STAGE (Remainder): Ingest, 128×64 OLED Screen & Transport
+            // UPPER HERO STAGE: Ingest, 128×64 OLED Screen & Transport
             // ================================================================
-            strip.cell(|ui| {
-                RolandTheme::rack_card_frame().show(ui, |ui| {
+            RolandTheme::rack_card_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
 
                     // Top Card Header: Hardware OLED Label & Amber Tint Toggle
@@ -329,24 +319,21 @@ pub fn show_screen_studio_ui(
 
                     ui.add_space(3.0);
 
-                    // Row 2: Hero OLED Bezel (Reserving 26px for Transport Bar below)
-                    let bezel_avail_h = (ui.available_height() - 26.0).max(64.0);
-                    ui.allocate_ui(Vec2::new(ui.available_width(), bezel_avail_h), |ui| {
-                        if let Some(frame) = state.mono_frames.get(state.current_frame) {
-                            let resp = OledDisplayWidget::new(
-                                frame,
-                                state.amber_preview,
-                                state.current_frame,
-                                state.mono_frames.len(),
-                            )
-                            .show(ui);
-                            if resp.clicked() {
-                                state.is_playing = !state.is_playing;
-                            }
+                    // Row 2: Hero OLED Bezel
+                    if let Some(frame) = state.mono_frames.get(state.current_frame) {
+                        let resp = OledDisplayWidget::new(
+                            frame,
+                            state.amber_preview,
+                            state.current_frame,
+                            state.mono_frames.len(),
+                        )
+                        .show(ui);
+                        if resp.clicked() {
+                            state.is_playing = !state.is_playing;
                         }
-                    });
+                    }
 
-                    ui.add_space(2.0);
+                    ui.add_space(3.0);
 
                     // Row 3: Docked Transport Bar (Play/Pause, Step Back, Step Fwd, Scrubber, FPS)
                     ui.horizontal(|ui| {
@@ -414,14 +401,12 @@ pub fn show_screen_studio_ui(
                             });
                     });
                 });
-            });
 
-            strip.cell(|_ui| {});
+                ui.add_space(RolandTheme::CARD_GAP);
 
-            // ================================================================
-            // LOWER CONTROL DECK: Dual-Tab Controller ([DITHER] / [SD SYNC])
-            // ================================================================
-            strip.cell(|ui| {
+                // ================================================================
+                // LOWER CONTROL DECK: Dual-Tab Controller ([DITHER] / [SD SYNC])
+                // ================================================================
                 let mut changed = false;
 
                 RolandTheme::rack_card_frame().show(ui, |ui| {
@@ -820,5 +805,4 @@ pub fn show_screen_studio_ui(
                     }
                 });
             });
-        });
 }
